@@ -1,0 +1,612 @@
+from django.shortcuts import render, redirect, get_object_or_404
+from django.http import HttpResponse
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, ListFlowable, ListItem, Preformatted
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib import colors
+import re
+from django.urls import reverse
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth import login as auth_login
+from .models import Document, ProcessedResult, YouTubeVideo, YouTubeProcessedResult
+from .forms import DocumentUploadForm, YouTubeURLForm, TranslationForm
+from .utils import (
+    extract_text_from_file, summarize_text, generate_answers, 
+    analyze_text, translate_text, get_youtube_video_id, 
+    get_youtube_transcript
+)
+import os
+
+def home(request):
+    """Home page view"""
+    return render(request, 'docprocessor/home.html')
+
+def dashboard(request):
+    """Dashboard view showing user's documents and results"""
+    if request.user.is_authenticated:
+        documents = Document.objects.filter(user=request.user).order_by('-uploaded_at')
+        youtube_videos = YouTubeVideo.objects.filter(user=request.user).order_by('-processed_at')
+        youtube_results = YouTubeProcessedResult.objects.filter(user=request.user).order_by('-processed_at')
+    else:
+        documents = Document.objects.all().order_by('-uploaded_at')
+        youtube_videos = YouTubeVideo.objects.all().order_by('-processed_at')
+        youtube_results = YouTubeProcessedResult.objects.all().order_by('-processed_at')
+    
+    context = {
+        'documents': documents,
+        'youtube_videos': youtube_videos,
+        'youtube_results': youtube_results,
+    }
+    return render(request, 'docprocessor/dashboard.html', context)
+
+def register_view(request):
+    """User registration view"""
+    if request.method == 'POST':
+        form = UserCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            auth_login(request, user)
+            messages.success(request, 'Welcome! Your account has been created.')
+            return redirect('dashboard')
+        else:
+            messages.error(request, 'Please correct the errors below.')
+    else:
+        form = UserCreationForm()
+    return render(request, 'docprocessor/register.html', {'form': form})
+
+def upload_document(request):
+    """View for uploading documents"""
+    if request.method == 'POST':
+        form = DocumentUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            document = form.save(commit=False)
+            
+            # Determine document type based on file extension
+            file_extension = os.path.splitext(document.file.name)[1].lower()
+            if file_extension in ['.pdf']:
+                document.document_type = 'pdf'
+            elif file_extension in ['.docx', '.doc']:
+                document.document_type = 'docx'
+            elif file_extension in ['.txt']:
+                document.document_type = 'txt'
+            elif file_extension in ['.jpg', '.jpeg', '.png']:
+                document.document_type = 'image'
+            
+            # Associate with user if authenticated
+            if request.user.is_authenticated:
+                document.user = request.user
+            
+            document.save()
+            messages.success(request, 'Document uploaded successfully!')
+            return redirect('process_document', document_id=document.id)
+    else:
+        form = DocumentUploadForm()
+    
+    return render(request, 'docprocessor/upload.html', {'form': form})
+
+def process_document(request, document_id):
+    """Process the uploaded document"""
+    document = get_object_or_404(Document, id=document_id)
+    
+    # Extract text from the document
+    file_path = document.file.path
+    extracted_text = extract_text_from_file(file_path, document.document_type)
+    
+    # Reply length via words (slider) and optional tokens fallback
+    words_param = request.GET.get('words')
+    tokens_param = request.GET.get('tokens')
+    length_param = request.GET.get('length')
+    try:
+        target_words = int(words_param) if words_param else None
+    except (TypeError, ValueError):
+        target_words = None
+    # Generous token budget to avoid truncation; approx 3 tokens per word
+    try:
+        max_tokens = int(tokens_param) if tokens_param else None
+    except (TypeError, ValueError):
+        max_tokens = None
+    if not max_tokens and target_words:
+        max_tokens = min(3800, max(256, int(target_words) * 3))
+    if not max_tokens and length_param:
+        length_map = {'short': 200, 'medium': 500, 'long': 1000}
+        max_tokens = length_map.get(length_param.lower())
+    if not max_tokens:
+        max_tokens = 800
+
+    # Process the text based on the selected processing type
+    if document.processing_type == 'summarize':
+        result_text = summarize_text(extracted_text, target_words=target_words, max_tokens=max_tokens)
+    elif document.processing_type == 'generate':
+        result_text = generate_answers(extracted_text, target_words=target_words, max_tokens=max_tokens)
+    elif document.processing_type == 'analyze':
+        result_text = analyze_text(extracted_text, target_words=target_words, max_tokens=max_tokens)
+    elif document.processing_type == 'translate':
+        # Default to English translation
+        result_text = translate_text(extracted_text, 'English', max_tokens=max_tokens)
+    else:
+        result_text = "Unknown processing type"
+    
+    # Save the processed result
+    processed_result = ProcessedResult.objects.create(
+        document=document,
+        result_text=result_text
+    )
+    
+    return render(request, 'docprocessor/result.html', {
+        'document': document,
+        'result': processed_result,
+        'extracted_text': extracted_text
+    })
+
+def summarize_view(request):
+    """View for summarizing documents"""
+    external_result = None
+    external_source = None
+    if request.method == 'POST':
+        form = DocumentUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            document = form.save(commit=False)
+            document.processing_type = 'summarize'
+            
+            # Determine document type based on file extension
+            file_extension = os.path.splitext(document.file.name)[1].lower()
+            if file_extension in ['.pdf']:
+                document.document_type = 'pdf'
+            elif file_extension in ['.docx', '.doc']:
+                document.document_type = 'docx'
+            elif file_extension in ['.txt']:
+                document.document_type = 'txt'
+            elif file_extension in ['.jpg', '.jpeg', '.png']:
+                document.document_type = 'image'
+            
+            # Associate with user if authenticated
+            if request.user.is_authenticated:
+                document.user = request.user
+            
+            document.save()
+            # Preserve words from slider to processing step
+            redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+            words_val = request.POST.get('words')
+            if words_val:
+                redirect_url = f"{redirect_url}?words={words_val}"
+            return redirect(redirect_url)
+    else:
+        form = DocumentUploadForm(initial={'processing_type': 'summarize'})
+        youtube_id = request.GET.get('youtube_id')
+        words_param = request.GET.get('words')
+        tokens_param = request.GET.get('tokens')
+        length_param = request.GET.get('length')
+        try:
+            target_words = int(words_param) if words_param else None
+        except (TypeError, ValueError):
+            target_words = None
+        try:
+            max_tokens = int(tokens_param) if tokens_param else None
+        except (TypeError, ValueError):
+            max_tokens = None
+        if not max_tokens and target_words:
+            max_tokens = min(3800, max(256, int(target_words) * 3))
+        if not max_tokens and length_param:
+            length_map = {'short': 200, 'medium': 500, 'long': 1000}
+            max_tokens = length_map.get(length_param.lower())
+        if not max_tokens:
+            max_tokens = 800
+        if youtube_id:
+            try:
+                ytv = YouTubeVideo.objects.get(id=youtube_id)
+                transcript = ytv.transcript or ''
+                if transcript:
+                    external_result = summarize_text(transcript, target_words=target_words, max_tokens=max_tokens)
+                    external_source = 'YouTube Transcript'
+                    # Persist the result for dashboard/result viewing
+                    YouTubeProcessedResult.objects.create(
+                        youtube_video=ytv,
+                        processing_type='summarize',
+                        result_text=external_result,
+                        user=request.user if request.user.is_authenticated else None,
+                    )
+            except YouTubeVideo.DoesNotExist:
+                pass
+    
+    return render(request, 'docprocessor/summarize.html', {
+        'form': form,
+        'external_result': external_result,
+        'external_source': external_source,
+        'youtube_id': request.GET.get('youtube_id'),
+    })
+
+def generate_view(request):
+    """View for generating answers from documents"""
+    external_result = None
+    external_source = None
+    if request.method == 'POST':
+        form = DocumentUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            document = form.save(commit=False)
+            document.processing_type = 'generate'
+            
+            # Determine document type based on file extension
+            file_extension = os.path.splitext(document.file.name)[1].lower()
+            if file_extension in ['.pdf']:
+                document.document_type = 'pdf'
+            elif file_extension in ['.docx', '.doc']:
+                document.document_type = 'docx'
+            elif file_extension in ['.txt']:
+                document.document_type = 'txt'
+            elif file_extension in ['.jpg', '.jpeg', '.png']:
+                document.document_type = 'image'
+            
+            # Associate with user if authenticated
+            if request.user.is_authenticated:
+                document.user = request.user
+            
+            document.save()
+            redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+            words_val = request.POST.get('words')
+            if words_val:
+                redirect_url = f"{redirect_url}?words={words_val}"
+            return redirect(redirect_url)
+    else:
+        form = DocumentUploadForm(initial={'processing_type': 'generate'})
+        youtube_id = request.GET.get('youtube_id')
+        words_param = request.GET.get('words')
+        tokens_param = request.GET.get('tokens')
+        length_param = request.GET.get('length')
+        try:
+            target_words = int(words_param) if words_param else None
+        except (TypeError, ValueError):
+            target_words = None
+        try:
+            max_tokens = int(tokens_param) if tokens_param else None
+        except (TypeError, ValueError):
+            max_tokens = None
+        if not max_tokens and target_words:
+            max_tokens = min(3800, max(256, int(target_words) * 3))
+        if not max_tokens and length_param:
+            length_map = {'short': 200, 'medium': 500, 'long': 1000}
+            max_tokens = length_map.get(length_param.lower())
+        if not max_tokens:
+            max_tokens = 800
+        if youtube_id:
+            try:
+                ytv = YouTubeVideo.objects.get(id=youtube_id)
+                transcript = ytv.transcript or ''
+                if transcript:
+                    external_result = generate_answers(transcript, target_words=target_words, max_tokens=max_tokens)
+                    external_source = 'YouTube Transcript'
+                    YouTubeProcessedResult.objects.create(
+                        youtube_video=ytv,
+                        processing_type='generate',
+                        result_text=external_result,
+                        user=request.user if request.user.is_authenticated else None,
+                    )
+            except YouTubeVideo.DoesNotExist:
+                pass
+    
+    return render(request, 'docprocessor/generate.html', {
+        'form': form,
+        'external_result': external_result,
+        'external_source': external_source,
+        'youtube_id': request.GET.get('youtube_id'),
+    })
+
+def analyze_view(request):
+    """View for analyzing documents"""
+    external_result = None
+    external_source = None
+    if request.method == 'POST':
+        form = DocumentUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            document = form.save(commit=False)
+            document.processing_type = 'analyze'
+            
+            # Determine document type based on file extension
+            file_extension = os.path.splitext(document.file.name)[1].lower()
+            if file_extension in ['.pdf']:
+                document.document_type = 'pdf'
+            elif file_extension in ['.docx', '.doc']:
+                document.document_type = 'docx'
+            elif file_extension in ['.txt']:
+                document.document_type = 'txt'
+            elif file_extension in ['.jpg', '.jpeg', '.png']:
+                document.document_type = 'image'
+            
+            # Associate with user if authenticated
+            if request.user.is_authenticated:
+                document.user = request.user
+            
+            document.save()
+            redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+            words_val = request.POST.get('words')
+            if words_val:
+                redirect_url = f"{redirect_url}?words={words_val}"
+            return redirect(redirect_url)
+    else:
+        form = DocumentUploadForm(initial={'processing_type': 'analyze'})
+        youtube_id = request.GET.get('youtube_id')
+        words_param = request.GET.get('words')
+        tokens_param = request.GET.get('tokens')
+        length_param = request.GET.get('length')
+        try:
+            target_words = int(words_param) if words_param else None
+        except (TypeError, ValueError):
+            target_words = None
+        try:
+            max_tokens = int(tokens_param) if tokens_param else None
+        except (TypeError, ValueError):
+            max_tokens = None
+        if not max_tokens and target_words:
+            max_tokens = min(3800, max(256, int(target_words) * 3))
+        if not max_tokens and length_param:
+            length_map = {'short': 200, 'medium': 500, 'long': 1000}
+            max_tokens = length_map.get(length_param.lower())
+        if not max_tokens:
+            max_tokens = 800
+        if youtube_id:
+            try:
+                ytv = YouTubeVideo.objects.get(id=youtube_id)
+                transcript = ytv.transcript or ''
+                if transcript:
+                    external_result = analyze_text(transcript, target_words=target_words, max_tokens=max_tokens)
+                    external_source = 'YouTube Transcript'
+                    YouTubeProcessedResult.objects.create(
+                        youtube_video=ytv,
+                        processing_type='analyze',
+                        result_text=external_result,
+                        user=request.user if request.user.is_authenticated else None,
+                    )
+            except YouTubeVideo.DoesNotExist:
+                pass
+
+    return render(request, 'docprocessor/analyze.html', {
+        'form': form,
+        'external_result': external_result,
+        'external_source': external_source,
+        'youtube_id': request.GET.get('youtube_id'),
+    })
+
+def youtube_result_view(request, result_id):
+    """View a persisted result from a YouTube transcript processing"""
+    yt_result = get_object_or_404(YouTubeProcessedResult, id=result_id)
+    youtube_video = yt_result.youtube_video
+    transcript_preview = (youtube_video.transcript or '')
+    return render(request, 'docprocessor/youtube_result.html', {
+        'youtube_video': youtube_video,
+        'yt_result': yt_result,
+        'transcript_preview': transcript_preview,
+    })
+
+def accessibility_view(request):
+    """View for accessibility features (translation and YouTube)"""
+    translation_form = TranslationForm()
+    youtube_form = YouTubeURLForm()
+    
+    translation_result = None
+    youtube_result = None
+    youtube_video_obj = None
+    youtube_processed_type = None
+    youtube_processed_result = None
+    
+    if request.method == 'POST':
+        if 'translate_submit' in request.POST:
+            translation_form = TranslationForm(request.POST)
+            if translation_form.is_valid():
+                text = translation_form.cleaned_data['text']
+                source_language = translation_form.cleaned_data['source_language']
+                target_language = translation_form.cleaned_data['target_language']
+                
+                translation_result = translate_text(text, target_language, source_language)
+        
+        elif 'youtube_submit' in request.POST:
+            youtube_form = YouTubeURLForm(request.POST)
+            if youtube_form.is_valid():
+                youtube_url = youtube_form.cleaned_data['url']
+                video_id = get_youtube_video_id(youtube_url)
+                
+                if video_id:
+                    transcript = get_youtube_transcript(video_id)
+                    
+                    youtube_video = youtube_form.save(commit=False)
+                    youtube_video.transcript = transcript
+                    # Associate with user if authenticated
+                    if request.user.is_authenticated:
+                        youtube_video.user = request.user
+                    youtube_video.save()
+                    
+                    youtube_result = transcript
+                    youtube_video_obj = youtube_video
+                else:
+                    messages.error(request, 'Invalid YouTube URL')
+        elif 'youtube_action' in request.POST:
+            # Process previously saved transcript based on selected action
+            action = request.POST.get('youtube_action')
+            video_id = request.POST.get('video_id')
+            if video_id and action:
+                try:
+                    youtube_video_obj = YouTubeVideo.objects.get(id=video_id)
+                    transcript = youtube_video_obj.transcript or ''
+                    if transcript:
+                        # Ensure transcript preview still renders after action
+                        youtube_result = transcript
+                        if action == 'summarize':
+                            youtube_processed_type = 'Summary'
+                            youtube_processed_result = summarize_text(transcript)
+                        elif action == 'generate':
+                            youtube_processed_type = 'Generated Answers'
+                            youtube_processed_result = generate_answers(transcript)
+                        elif action == 'analyze':
+                            youtube_processed_type = 'Analysis'
+                            youtube_processed_result = analyze_text(transcript)
+                    else:
+                        messages.error(request, 'No transcript found to process.')
+                except YouTubeVideo.DoesNotExist:
+                    messages.error(request, 'YouTube video not found.')
+    
+    context = {
+        'translation_form': translation_form,
+        'youtube_form': youtube_form,
+        'translation_result': translation_result,
+        'youtube_result': youtube_result,
+        'youtube_video': youtube_video_obj,
+        'youtube_processed_type': youtube_processed_type,
+        'youtube_processed_result': youtube_processed_result,
+    }
+    
+    return render(request, 'docprocessor/accessibility.html', context)
+def _draw_header_footer(canvas, doc, branding="Smartly", footer_text=""):
+    canvas.saveState()
+    width, height = letter
+    canvas.setFont('Helvetica-Bold', 10)
+    canvas.drawString(doc.leftMargin, height - 0.5 * inch, branding)
+    canvas.setFont('Helvetica', 9)
+    canvas.drawRightString(width - doc.rightMargin, 0.5 * inch, f"Page {canvas.getPageNumber()}")
+    if footer_text:
+        canvas.drawString(doc.leftMargin, 0.5 * inch, footer_text)
+    canvas.restoreState()
+
+def _build_styles():
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='CoverBrand', fontSize=18, leading=22, alignment=TA_CENTER, textColor=colors.HexColor('#2c3e50')))
+    styles.add(ParagraphStyle(name='CoverTitle', fontSize=24, leading=28, alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name='Meta', fontSize=10, leading=13, textColor=colors.grey))
+    styles.add(ParagraphStyle(name='H1', parent=styles['Heading1'], fontSize=16))
+    styles.add(ParagraphStyle(name='H2', parent=styles['Heading2'], fontSize=14))
+    styles.add(ParagraphStyle(name='H3', parent=styles['Heading3'], fontSize=12))
+    # Use a unique list item style name to avoid collision with ReportLab's default 'Bullet'
+    styles.add(ParagraphStyle(name='BulletText', parent=styles['BodyText'], leftIndent=12))
+    # Use a unique code style name to avoid collision with default 'Code'
+    styles.add(ParagraphStyle(name='CodeBlock', fontName='Courier', fontSize=9, leading=12, backColor=colors.whitesmoke))
+    return styles
+
+def _markdown_to_story(text, styles):
+    story = []
+    lines = text.splitlines()
+    in_code = False
+    code_lines = []
+    list_items = []
+    in_list = False
+    for line in lines:
+        stripped = line.rstrip()
+        # Code fences
+        if stripped.startswith('```'):
+            if in_code:
+                story.append(Preformatted('\n'.join(code_lines), styles['CodeBlock']))
+                code_lines = []
+                in_code = False
+            else:
+                in_code = True
+            continue
+        if in_code:
+            code_lines.append(line)
+            continue
+        # Headings
+        m = re.match(r'^(#{1,3})\s+(.*)$', stripped)
+        if m:
+            level = len(m.group(1))
+            content = m.group(2)
+            style_name = 'H1' if level == 1 else 'H2' if level == 2 else 'H3'
+            story.append(Paragraph(content, styles[style_name]))
+            continue
+        # Lists (unordered and ordered)
+        m_ul = re.match(r'^\s*[-*]\s+(.*)$', stripped)
+        m_ol = re.match(r'^\s*\d+\.\s+(.*)$', stripped)
+        if m_ul or m_ol:
+            if not in_list:
+                list_items = []
+                in_list = True
+            item_text = (m_ul.group(1) if m_ul else m_ol.group(1))
+            list_items.append(ListItem(Paragraph(item_text, styles['BulletText'])))
+            continue
+        else:
+            if in_list:
+                story.append(ListFlowable(list_items, bulletType='bullet'))
+                list_items = []
+                in_list = False
+        # Blank line -> spacer
+        if stripped.strip() == '':
+            story.append(Spacer(1, 0.15 * inch))
+        else:
+            # Basic HTML line breaks
+            paragraph_text = stripped.replace('<br/>', '<br />').replace('<br>', '<br />')
+            story.append(Paragraph(paragraph_text, styles['BodyText']))
+    # Flush any remaining list
+    if in_list:
+        story.append(ListFlowable(list_items, bulletType='bullet'))
+    # Flush any remaining code block (if not closed correctly)
+    if in_code and code_lines:
+        story.append(Preformatted('\n'.join(code_lines), styles['CodeBlock']))
+    return story
+def download_result_pdf(request, result_id):
+    """Download a processed document result as PDF"""
+    pr = get_object_or_404(ProcessedResult, id=result_id)
+    document = pr.document
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = _build_styles()
+    story = []
+    # Cover page
+    story.append(Paragraph("Smartly", styles['CoverBrand']))
+    title = f"{document.title}"
+    story.append(Paragraph(title, styles['CoverTitle']))
+    story.append(Spacer(1, 0.2 * inch))
+    subtitle = f"{document.get_processing_type_display()}"
+    story.append(Paragraph(subtitle, styles['H2']))
+    meta = f"Document Type: {document.get_document_type_display()}<br/>"
+    meta += f"Uploaded: {document.uploaded_at:%B %d, %Y %H:%M}<br/>"
+    meta += f"Processed: {pr.processed_at:%B %d, %Y %H:%M}"
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(meta, styles['Meta']))
+    story.append(PageBreak())
+    # Body
+    story.append(Paragraph("Result", styles['H1']))
+    story.append(Spacer(1, 0.1 * inch))
+    story.extend(_markdown_to_story(pr.result_text, styles))
+    doc.build(story,
+              onFirstPage=lambda c, d: _draw_header_footer(c, d, branding="Smartly", footer_text=document.title),
+              onLaterPages=lambda c, d: _draw_header_footer(c, d, branding="Smartly", footer_text=document.title))
+    pdf = buffer.getvalue()
+    buffer.close()
+    response = HttpResponse(pdf, content_type='application/pdf')
+    filename = f"{document.title.replace(' ', '_')}_{document.processing_type}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+def download_youtube_result_pdf(request, result_id):
+    """Download a YouTube processed result as PDF"""
+    yt_pr = get_object_or_404(YouTubeProcessedResult, id=result_id)
+    youtube_video = yt_pr.youtube_video
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = _build_styles()
+    story = []
+    # Cover page
+    story.append(Paragraph("Smartly", styles['CoverBrand']))
+    title = youtube_video.title or youtube_video.url
+    story.append(Paragraph(title, styles['CoverTitle']))
+    story.append(Spacer(1, 0.2 * inch))
+    subtitle = yt_pr.get_processing_type_display()
+    story.append(Paragraph(subtitle, styles['H2']))
+    meta = f"Video: {youtube_video.url}<br/>Processed: {yt_pr.processed_at:%B %d, %Y %H:%M}"
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(meta, styles['Meta']))
+    story.append(PageBreak())
+    # Body
+    story.append(Paragraph("Result", styles['H1']))
+    story.append(Spacer(1, 0.1 * inch))
+    story.extend(_markdown_to_story(yt_pr.result_text, styles))
+    doc.build(story,
+              onFirstPage=lambda c, d: _draw_header_footer(c, d, branding="Smartly", footer_text=title),
+              onLaterPages=lambda c, d: _draw_header_footer(c, d, branding="Smartly", footer_text=title))
+    pdf = buffer.getvalue()
+    buffer.close()
+    response = HttpResponse(pdf, content_type='application/pdf')
+    base = (youtube_video.title or 'youtube').replace(' ', '_')
+    filename = f"{base}_{yt_pr.processing_type}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response

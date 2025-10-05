@@ -1,0 +1,175 @@
+{% extends 'docprocessor/base.html' %}
+
+{% block content %}
+<div class="container my-5">
+    <!-- Welcome Banner -->
+    <div class="card glass mb-4">
+        <div class="card-body d-flex justify-content-between align-items-center">
+            <div>
+                {% if request.user.is_authenticated %}
+                    <h3 class="mb-1">Welcome, {{ request.user.username }} 👋</h3>
+                    <p class="text-muted mb-0">Here’s your recent activity and resources.</p>
+                {% else %}
+                    <h3 class="mb-1">Welcome to your Dashboard 👋</h3>
+                    <p class="text-muted mb-0">Sign in to see your personalized activity.</p>
+                {% endif %}
+            </div>
+            <div class="text-end">
+                {% if request.user.is_authenticated %}
+                    <span class="badge bg-primary">Joined {{ request.user.date_joined|date:"M d, Y" }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card glass">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Recent Documents {% if documents %}<span class="badge bg-secondary ms-2">{{ documents|length }}</span>{% endif %}</h5>
+                    <a href="{% url 'upload_document' %}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-upload me-1"></i> Upload New
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if documents %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Title</th>
+                                        <th>Type</th>
+                                        <th>Processing</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for document in documents %}
+                                        <tr>
+                                            <td>{{ document.title }}</td>
+                                            <td><span class="badge bg-secondary">{{ document.get_document_type_display }}</span></td>
+                                            <td><span class="badge bg-primary">{{ document.get_processing_type_display }}</span></td>
+                                            <td>{{ document.uploaded_at|date:"M d, Y" }}</td>
+                                            <td>
+                                                <a href="{% url 'process_document' document.id %}" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-file-alt fa-3x mb-3 text-muted"></i>
+                            <p>No documents uploaded yet.</p>
+                            <a href="{% url 'upload_document' %}" class="btn btn-primary">
+                                <i class="fas fa-upload me-2"></i>Upload Your First Document
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card glass">
+                <div class="card-header">
+                    <h5 class="mb-0">YouTube Videos</h5>
+                </div>
+                <div class="card-body">
+                    {% if youtube_videos %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Title/URL</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for video in youtube_videos %}
+                                        <tr>
+                                            <td>{{ video.title|default:video.url }}</td>
+                                            <td>{{ video.processed_at|date:"M d, Y" }}</td>
+                                            <td>
+                                                <a href="{{ video.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fab fa-youtube"></i> View
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <i class="fab fa-youtube fa-3x mb-3 text-muted"></i>
+                            <p>No YouTube videos processed yet.</p>
+                            <a href="{% url 'accessibility' %}" class="btn btn-primary">
+                                <i class="fab fa-youtube me-2"></i>Process YouTube Video
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card glass">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">YouTube Processed Results {% if youtube_results %}<span class="badge bg-secondary ms-2">{{ youtube_results|length }}</span>{% endif %}</h5>
+                    <a href="{% url 'accessibility' %}" class="btn btn-primary btn-sm">
+                        <i class="fab fa-youtube me-1"></i> Process New
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% if youtube_results %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Video</th>
+                                        <th>Type</th>
+                                        <th>Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for res in youtube_results %}
+                                        <tr>
+                                            <td>{{ res.youtube_video.title|default:res.youtube_video.url }}</td>
+                                            <td><span class="badge bg-primary">{{ res.get_processing_type_display }}</span></td>
+                                            <td>{{ res.processed_at|date:"M d, Y" }}</td>
+                                            <td>
+                                                <a href="{% url 'youtube_result' res.id %}" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-list fa-3x mb-3 text-muted"></i>
+                            <p>No YouTube processed results yet.</p>
+                            <a href="{% url 'accessibility' %}" class="btn btn-primary">
+                                <i class="fab fa-youtube me-2"></i>Process YouTube Video
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

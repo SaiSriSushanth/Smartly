@@ -1,0 +1,347 @@
+/*
+  Smartly – Modern Glass & Glossy UI Theme
+  Clean, translucent surfaces with subtle gradients and blur.
+*/
+
+:root {
+  /* Base palette */
+  --bg-0: #f8fafc; /* slate-50 */
+  --bg-1: #eef2ff; /* indigo-50 */
+  --bg-2: #e0f2fe; /* sky-100 */
+  --text-0: #0f172a; /* slate-900 */
+  --text-1: #334155; /* slate-700 */
+  --text-muted: #64748b; /* slate-500 */
+
+  /* Accents */
+  --accent-cyan: #06b6d4; /* cyan-500 */
+  --accent-blue: #3b82f6; /* blue-500 */
+  --accent-indigo: #6366f1; /* indigo-500 */
+  --accent-purple: #8b5cf6; /* purple-500 */
+  --accent-pink: #ec4899; /* pink-500 */
+  --accent-green: #22c55e; /* green-500 */
+
+  /* Glass surfaces */
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-bg-strong: rgba(255, 255, 255, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.45);
+  --glass-shadow: 0 10px 30px rgba(2, 6, 23, 0.08);
+
+  /* Rings */
+  --ring: rgba(99, 102, 241, 0.35); /* indigo */
+  --ring-strong: rgba(99, 102, 241, 0.55);
+
+  /* Radii */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+
+  /* Transitions */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Background with soft gradient & pattern */
+body {
+  color: var(--text-0);
+  background:
+    radial-gradient(1200px 600px at -10% 0%, rgba(99, 102, 241, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(6, 182, 212, 0.08), transparent 65%),
+    linear-gradient(135deg, var(--bg-0) 0%, var(--bg-1) 55%, var(--bg-2) 100%);
+  min-height: 100vh;
+}
+
+/* Utility: glass surface */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: saturate(140%) blur(14px);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+/* Headers & text */
+h1, h2, h3, h4, h5, h6 { color: var(--text-0); }
+p, .text-muted { color: var(--text-muted); }
+
+/* Navbar: glossy glass */
+.navbar {
+  border-radius: var(--radius-md);
+  margin-top: 12px;
+  padding: 0.5rem 1rem;
+}
+.navbar.glass {
+  background:
+    linear-gradient(180deg, var(--glass-bg-strong), var(--glass-bg));
+}
+.navbar .nav-link {
+  color: var(--text-1);
+  transition: color 160ms var(--ease), transform 160ms var(--ease);
+}
+.navbar .nav-link:hover {
+  color: var(--accent-indigo);
+  transform: translateY(-1px);
+}
+
+/* Cards and containers */
+.card, .feature-card, .result-container, .stat-card, .modal-content {
+  border-radius: var(--radius-lg);
+}
+.card.glass, .feature-card.glass, .result-container.glass, .stat-card.glass, .modal-content.glass {
+  background:
+    linear-gradient(180deg, var(--glass-bg-strong), var(--glass-bg));
+}
+.card-header {
+  border-bottom: 1px solid var(--glass-border);
+  background: transparent;
+}
+
+/* Buttons: glossy gradients */
+.btn {
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.6rem 1rem;
+  transition: transform 160ms var(--ease), box-shadow 160ms var(--ease), filter 160ms var(--ease);
+}
+.btn:active { transform: translateY(1px); }
+
+.btn-primary {
+  color: white;
+  background-image: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px rgba(6, 182, 212, 0.25);
+}
+.btn-primary:hover { filter: brightness(1.06); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 24px rgba(6, 182, 212, 0.28); }
+
+.btn-secondary {
+  color: white;
+  background-image: linear-gradient(135deg, var(--accent-purple), var(--accent-pink));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px rgba(139, 92, 246, 0.25);
+}
+.btn-secondary:hover { filter: brightness(1.06); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 24px rgba(139, 92, 246, 0.28); }
+
+.btn-outline {
+  color: var(--text-0);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+.btn-outline:hover { color: var(--accent-indigo); border-color: rgba(99,102,241,0.5); }
+
+/* Forms: frosted inputs */
+.form-control, .form-select, textarea {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-0);
+  border-radius: var(--radius-md);
+}
+.form-control:focus, .form-select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent-indigo);
+  box-shadow: 0 0 0 6px var(--ring);
+  background: var(--glass-bg-strong);
+}
+
+/* Form labels and helper text: improve visibility on dark backgrounds */
+label, .form-label { color: #e6edf7; }
+.form-text { color: #cbd5e1; }
+.form-control::placeholder { color: #cbd5e1; }
+
+/* File input button: match glossy primary style */
+input[type="file"] { color: #e6edf7; }
+input[type="file"]::file-selector-button {
+  color: white;
+  background-image: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.45rem 0.9rem;
+  margin-right: 0.75rem;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px rgba(6, 182, 212, 0.25);
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover {
+  filter: brightness(1.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 24px rgba(6, 182, 212, 0.28);
+}
+/* Safari/WebKit fallback */
+input[type="file"]::-webkit-file-upload-button {
+  color: white;
+  background-image: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.45rem 0.9rem;
+  margin-right: 0.75rem;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px rgba(6, 182, 212, 0.25);
+  cursor: pointer;
+}
+input[type="file"]::-webkit-file-upload-button:hover { filter: brightness(1.06); }
+
+/* Hero / section wrappers */
+.hero {
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 2rem;
+}
+.hero.glass {
+  background:
+    linear-gradient(180deg, var(--glass-bg-strong), var(--glass-bg));
+}
+
+/* Feature cards */
+.feature-card {
+  transition: transform 160ms var(--ease), box-shadow 160ms var(--ease);
+}
+.feature-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 32px rgba(2,6,23,0.12);
+}
+
+/* Result container */
+.result-container {
+  padding: 1.25rem;
+}
+.result-container pre, .result-container .preformatted {
+  background: rgba(255,255,255,0.55);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+}
+
+/* Dashboard stats */
+.dashboard-stats { gap: 1rem; }
+.stat-card {
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.stat-value { color: var(--text-0); font-weight: 700; }
+.stat-label { color: var(--text-muted); }
+
+/* Footer */
+footer {
+  border-top: 1px solid rgba(2,6,23,0.06);
+  color: var(--text-muted);
+}
+
+/* Links */
+a { color: var(--accent-indigo); text-decoration: none; }
+a:hover { color: var(--accent-blue); }
+
+/* How-it-works steps */
+.how-it-works .step { border-radius: var(--radius-md); }
+.how-it-works .step.glass { background: var(--glass-bg); }
+
+/* Responsive tweaks */
+@media (max-width: 768px) {
+  .navbar { margin-top: 8px; }
+  .hero { padding: 1.5rem 1rem; }
+}
+
+/* Optional dark mode (auto prefers-color-scheme) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-0: #0b1220;
+    --bg-1: #0a0f1a;
+    --bg-2: #0b1324;
+    --text-0: #e5e7eb;
+    --text-1: #cbd5e1;
+    --text-muted: #94a3b8;
+    --glass-bg: rgba(16, 20, 31, 0.55);
+    --glass-bg-strong: rgba(16, 20, 31, 0.7);
+    --glass-border: rgba(148, 163, 184, 0.22);
+    --glass-shadow: 0 10px 30px rgba(2, 6, 23, 0.35);
+    --ring: rgba(99, 102, 241, 0.45);
+    --ring-strong: rgba(99, 102, 241, 0.65);
+  }
+  body {
+    background:
+      radial-gradient(1200px 600px at -10% 0%, rgba(99, 102, 241, 0.15), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, rgba(6, 182, 212, 0.14), transparent 65%),
+      linear-gradient(135deg, var(--bg-0) 0%, var(--bg-1) 55%, var(--bg-2) 100%);
+  }
+}
+
+/* Tables: blend with glass cards and remove white backgrounds */
+.table {
+  background: transparent !important;
+  color: #e6edf7;
+}
+.table thead th {
+  background: transparent !important;
+  border-bottom-color: var(--glass-border);
+  color: #e6edf7;
+}
+.table tbody td,
+.table tbody th {
+  background: transparent !important;
+  border-top-color: var(--glass-border);
+  color: #e6edf7;
+}
+.table-hover tbody tr:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Improve feature card text visibility on dark backgrounds */
+.card.glass .card-title,
+.card.glass .card-text {
+  color: #e6edf7;
+}
+.card.glass .feature-icon i {
+  color: #e6edf7;
+  opacity: 0.9;
+}
+/* Result containers: improve readability */
+.result-container {
+  color: #e6edf7;
+  line-height: 1.6;
+}
+.result-container pre,
+.result-container div {
+  color: #e6edf7;
+}
+
+/* Preview clamp for long text blocks */
+.text-preview {
+  max-height: 240px;
+  overflow: hidden;
+  position: relative;
+}
+.text-preview .fade-out {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 60px;
+  background: linear-gradient(180deg, rgba(0,0,0,0), rgba(12, 20, 28, 0.75));
+  pointer-events: none;
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+/* Global text contrast overrides: ensure all incidental text is readable */
+/* Force common text elements to render light on dark backgrounds */
+p,
+.text-muted,
+small,
+.breadcrumb,
+.breadcrumb-item,
+.breadcrumb-item a,
+.breadcrumb-item.active,
+footer,
+.card-header h5,
+.card-header h3 {
+  color: #e6edf7 !important;
+}
+
+/* Breadcrumb separator color for better contrast */
+.breadcrumb-item + .breadcrumb-item::before {
+  color: rgba(230, 237, 247, 0.7) !important;
+}
+
+/* Outline buttons: keep text light and borders visible on dark surfaces */
+.btn-outline,
+.btn-outline-secondary {
+  color: #e6edf7 !important;
+  border-color: rgba(230, 237, 247, 0.6) !important;
+}
+.btn-outline:hover,
+.btn-outline-secondary:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(230, 237, 247, 0.8) !important;
+}

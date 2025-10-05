@@ -1,0 +1,74 @@
+{% extends 'docprocessor/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card glass">
+                <div class="card-header">
+                    <h3 class="mb-0">Analyze Document</h3>
+                </div>
+                <div class="card-body">
+                    <p class="mb-4">Upload documents to analyze content, rank topics by importance, or predict questions.</p>
+                    <div class="mb-3">
+                        <label class="form-label d-flex justify-content-between align-items-center">
+                            <span>Reply length</span>
+                            <span class="small text-muted"><span id="analyzeWordsDisplay">{{ request.GET.words|default:200 }}</span> words</span>
+                        </label>
+                        <input type="range" class="form-range" id="analyzeWordsRange" min="50" max="1000" step="50" value="{{ request.GET.words|default:200 }}">
+                    </div>
+                    
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        {{ form|crispy }}
+                        <input type="hidden" name="words" id="analyzeWordsInput" value="{{ request.GET.words|default:200 }}" />
+                        <div class="mt-4">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-chart-line me-2"></i>Analyze Content
+                            </button>
+                            <a href="{% url 'dashboard' %}" class="btn btn-outline">Cancel</a>
+                        </div>
+                    </form>
+
+                    {% if external_result %}
+                    <hr class="my-4" />
+                    <h5 class="mb-2">Result from {{ external_source }}:</h5>
+                    <div class="result-container glass">
+                        <div style="white-space: pre-wrap; font-family: inherit;">{{ external_result }}</div>
+                    </div>
+                    <div class="mt-3">
+                        <form method="get" action="{% url 'analyze' %}" class="d-inline">
+                            {% if youtube_id %}
+                                <input type="hidden" name="youtube_id" value="{{ youtube_id }}" />
+                            {% endif %}
+                            <input type="hidden" name="words" id="analyzeWordsGet" value="{{ request.GET.words|default:200 }}" />
+                            <button type="submit" class="btn btn-outline-primary btn-sm">
+                                <i class="fas fa-sync-alt me-1"></i> Re-run with length
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+  const range = document.getElementById('analyzeWordsRange');
+  const display = document.getElementById('analyzeWordsDisplay');
+  const hiddenPost = document.getElementById('analyzeWordsInput');
+  const hiddenGet = document.getElementById('analyzeWordsGet');
+  function sync(val){
+    if (display) display.textContent = val;
+    if (hiddenPost) hiddenPost.value = val;
+    if (hiddenGet) hiddenGet.value = val;
+  }
+  if (range){
+    range.addEventListener('input', function(){ sync(range.value); });
+    sync(range.value);
+  }
+})();
+</script>
+{% endblock %}
