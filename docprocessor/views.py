@@ -14,12 +14,12 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth import login as auth_login
-from .models import Document, ProcessedResult, YouTubeVideo, YouTubeProcessedResult
-from .forms import DocumentUploadForm, YouTubeURLForm, TranslationForm
+from .models import Document, ProcessedResult, YouTubeVideo, YouTubeProcessedResult, ChatSession, ChatMessage
+from .forms import DocumentUploadForm, DocumentSelectForm, YouTubeURLForm, TranslationForm
 from .utils import (
     extract_text_from_file, summarize_text, generate_answers, 
     analyze_text, translate_text, get_youtube_video_id, 
-    get_youtube_transcript
+    get_youtube_transcript, chat_with_openai
 )
 import os
 
@@ -45,6 +45,27 @@ def dashboard(request):
     }
     return render(request, 'docprocessor/dashboard.html', context)
 
+@login_required
+def delete_document(request, document_id):
+    """Delete an uploaded document owned by the current user."""
+    document = get_object_or_404(Document, id=document_id, user=request.user)
+    if request.method == 'POST':
+        title = document.title
+        try:
+            # Remove file from storage first
+            if getattr(document, 'file', None):
+                try:
+                    document.file.delete(save=False)
+                except Exception:
+                    pass
+            document.delete()
+            messages.success(request, f'Deleted "{title}" successfully.')
+        except Exception as e:
+            messages.error(request, f'Error deleting document: {e}')
+        return redirect('dashboard')
+    messages.warning(request, 'Invalid request method for delete.')
+    return redirect('dashboard')
+
 def register_view(request):
     """User registration view"""
     if request.method == 'POST':
@@ -66,6 +87,8 @@ def upload_document(request):
         form = DocumentUploadForm(request.POST, request.FILES)
         if form.is_valid():
             document = form.save(commit=False)
+            # Default processing type during upload (user selects actual action later)
+            document.processing_type = 'summarize'
             
             # Determine document type based on file extension
             file_extension = os.path.splitext(document.file.name)[1].lower()
@@ -84,7 +107,8 @@ def upload_document(request):
             
             document.save()
             messages.success(request, 'Document uploaded successfully!')
-            return redirect('process_document', document_id=document.id)
+            # Do not process immediately; send user to dashboard with confirmation
+            return redirect('dashboard')
     else:
         form = DocumentUploadForm()
     
@@ -149,10 +173,12 @@ def summarize_view(request):
     external_result = None
     external_source = None
     if request.method == 'POST':
-        form = DocumentUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            document = form.save(commit=False)
+        select_form = DocumentSelectForm(request.POST, user=request.user)
+        if select_form.is_valid():
+            document = select_form.cleaned_data['document']
+            # Update processing type for this run
             document.processing_type = 'summarize'
+            document.save(update_fields=['processing_type'])
             
             # Determine document type based on file extension
             file_extension = os.path.splitext(document.file.name)[1].lower()
@@ -165,11 +191,6 @@ def summarize_view(request):
             elif file_extension in ['.jpg', '.jpeg', '.png']:
                 document.document_type = 'image'
             
-            # Associate with user if authenticated
-            if request.user.is_authenticated:
-                document.user = request.user
-            
-            document.save()
             # Preserve words from slider to processing step
             redirect_url = reverse('process_document', kwargs={'document_id': document.id})
             words_val = request.POST.get('words')
@@ -177,7 +198,7 @@ def summarize_view(request):
                 redirect_url = f"{redirect_url}?words={words_val}"
             return redirect(redirect_url)
     else:
-        form = DocumentUploadForm(initial={'processing_type': 'summarize'})
+        select_form = DocumentSelectForm(user=request.user)
         youtube_id = request.GET.get('youtube_id')
         words_param = request.GET.get('words')
         tokens_param = request.GET.get('tokens')
@@ -215,7 +236,7 @@ def summarize_view(request):
                 pass
     
     return render(request, 'docprocessor/summarize.html', {
-        'form': form,
+        'select_form': select_form,
         'external_result': external_result,
         'external_source': external_source,
         'youtube_id': request.GET.get('youtube_id'),
@@ -226,10 +247,11 @@ def generate_view(request):
     external_result = None
     external_source = None
     if request.method == 'POST':
-        form = DocumentUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            document = form.save(commit=False)
+        select_form = DocumentSelectForm(request.POST, user=request.user)
+        if select_form.is_valid():
+            document = select_form.cleaned_data['document']
             document.processing_type = 'generate'
+            document.save(update_fields=['processing_type'])
             
             # Determine document type based on file extension
             file_extension = os.path.splitext(document.file.name)[1].lower()
@@ -242,18 +264,13 @@ def generate_view(request):
             elif file_extension in ['.jpg', '.jpeg', '.png']:
                 document.document_type = 'image'
             
-            # Associate with user if authenticated
-            if request.user.is_authenticated:
-                document.user = request.user
-            
-            document.save()
             redirect_url = reverse('process_document', kwargs={'document_id': document.id})
             words_val = request.POST.get('words')
             if words_val:
                 redirect_url = f"{redirect_url}?words={words_val}"
             return redirect(redirect_url)
     else:
-        form = DocumentUploadForm(initial={'processing_type': 'generate'})
+        select_form = DocumentSelectForm(user=request.user)
         youtube_id = request.GET.get('youtube_id')
         words_param = request.GET.get('words')
         tokens_param = request.GET.get('tokens')
@@ -290,7 +307,7 @@ def generate_view(request):
                 pass
     
     return render(request, 'docprocessor/generate.html', {
-        'form': form,
+        'select_form': select_form,
         'external_result': external_result,
         'external_source': external_source,
         'youtube_id': request.GET.get('youtube_id'),
@@ -301,10 +318,11 @@ def analyze_view(request):
     external_result = None
     external_source = None
     if request.method == 'POST':
-        form = DocumentUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            document = form.save(commit=False)
+        select_form = DocumentSelectForm(request.POST, user=request.user)
+        if select_form.is_valid():
+            document = select_form.cleaned_data['document']
             document.processing_type = 'analyze'
+            document.save(update_fields=['processing_type'])
             
             # Determine document type based on file extension
             file_extension = os.path.splitext(document.file.name)[1].lower()
@@ -317,18 +335,13 @@ def analyze_view(request):
             elif file_extension in ['.jpg', '.jpeg', '.png']:
                 document.document_type = 'image'
             
-            # Associate with user if authenticated
-            if request.user.is_authenticated:
-                document.user = request.user
-            
-            document.save()
             redirect_url = reverse('process_document', kwargs={'document_id': document.id})
             words_val = request.POST.get('words')
             if words_val:
                 redirect_url = f"{redirect_url}?words={words_val}"
             return redirect(redirect_url)
     else:
-        form = DocumentUploadForm(initial={'processing_type': 'analyze'})
+        select_form = DocumentSelectForm(user=request.user)
         youtube_id = request.GET.get('youtube_id')
         words_param = request.GET.get('words')
         tokens_param = request.GET.get('tokens')
@@ -365,7 +378,7 @@ def analyze_view(request):
                 pass
 
     return render(request, 'docprocessor/analyze.html', {
-        'form': form,
+        'select_form': select_form,
         'external_result': external_result,
         'external_source': external_source,
         'youtube_id': request.GET.get('youtube_id'),
@@ -610,3 +623,88 @@ def download_youtube_result_pdf(request, result_id):
     filename = f"{base}_{yt_pr.processing_type}.pdf"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+@login_required
+def chat_view(request):
+    """Interactive chat interface powered by OpenAI, with selectable document context."""
+    # Load user's documents for selection
+    documents = Document.objects.filter(user=request.user).order_by('-uploaded_at')
+
+    # Determine active session
+    session_id = request.GET.get('session_id') or request.POST.get('session_id')
+    active_session = None
+    if session_id:
+        active_session = ChatSession.objects.filter(id=session_id, user=request.user).first()
+
+    # Handle new message submission
+    if request.method == 'POST':
+        user_message = request.POST.get('message', '').strip()
+        system_prompt = request.POST.get('system_prompt', '').strip() or "You are a helpful AI assistant."
+        selected_ids = request.POST.getlist('documents')
+
+        if not active_session:
+            active_session = ChatSession.objects.create(user=request.user, title=request.POST.get('title', '').strip() or '')
+        # Update selected documents on session
+        if selected_ids:
+            active_session.documents.set(Document.objects.filter(id__in=selected_ids, user=request.user))
+        else:
+            active_session.documents.clear()
+
+        # Save user message
+        if user_message:
+            ChatMessage.objects.create(session=active_session, role='user', content=user_message)
+
+            # Build document context (trimmed)
+            context_snippets = []
+            total_chars = 0
+            for doc in active_session.documents.all():
+                try:
+                    text = extract_text_from_file(doc.file.path, doc.document_type)
+                except Exception:
+                    text = ''
+                snippet = (text or '')[:2000]
+                if snippet:
+                    context_snippets.append(f"- {doc.title}:\n{snippet}")
+                    total_chars += len(snippet)
+                if total_chars >= 5000:
+                    break
+            context_text = "\n\n".join(context_snippets)
+
+            # Prepare chat history messages
+            history = [
+                {"role": msg.role, "content": msg.content}
+                for msg in active_session.messages.order_by('created_at')
+            ]
+            if context_text:
+                history.insert(0, {"role": "system", "content": f"Context from selected documents:\n{context_text}"})
+
+            # Call OpenAI
+            assistant_reply = chat_with_openai(history, system_prompt=system_prompt, max_tokens=800)
+
+            # Save assistant message
+            ChatMessage.objects.create(session=active_session, role='assistant', content=assistant_reply)
+
+        return redirect(f"{reverse('chat')}?session_id={active_session.id}")
+
+    # Prepare page context
+    sessions = ChatSession.objects.filter(user=request.user).order_by('-created_at')
+    chat_messages = active_session.messages.order_by('created_at') if active_session else []
+    selected_doc_ids = set(active_session.documents.values_list('id', flat=True)) if active_session else set()
+    return render(request, 'docprocessor/chat.html', {
+        'documents': documents,
+        'sessions': sessions,
+        'active_session': active_session,
+        'chat_messages': chat_messages,
+        'selected_doc_ids': selected_doc_ids,
+    })
+
+
+@login_required
+def delete_chat_session(request, session_id):
+    """Delete a chat session and its messages for the current user."""
+    session = get_object_or_404(ChatSession, id=session_id, user=request.user)
+    if request.method == 'POST':
+        session.delete()
+        return redirect('chat')
+    # Only allow POST for deletion; redirect back if accessed via GET
+    return redirect(f"{reverse('chat')}?session_id={session.id}")

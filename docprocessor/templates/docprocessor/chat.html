@@ -1,0 +1,235 @@
+{% extends 'docprocessor/base.html' %}
+
+{% block content %}
+<div class="container my-5">
+  <div class="row">
+    <div class="col-md-3">
+      <div class="card glass mb-4">
+        <div class="card-header">
+          <h5 class="mb-0">Sessions</h5>
+        </div>
+        <div class="list-group list-group-flush">
+          <a href="{% url 'chat' %}" class="list-group-item list-group-item-action {% if not active_session %}active{% endif %}">
+            New Chat
+          </a>
+          {% for s in sessions %}
+            <div class="list-group-item d-flex justify-content-between align-items-center {% if active_session and s.id == active_session.id %}active{% endif %}">
+              <a href="{% url 'chat' %}?session_id={{ s.id }}" class="text-decoration-none flex-grow-1 me-2 text-reset">
+                {{ s.title|default:"Chat" }} <small class="text-muted">#{{ s.id }}</small>
+              </a>
+              <button type="button"
+                      class="btn btn-outline-danger btn-sm"
+                      title="Delete"
+                      data-session-id="{{ s.id }}"
+                      data-session-title="{{ s.title|default:'Chat' }}"
+                      data-delete-url="{% url 'delete_chat_session' s.id %}"
+                      onclick="openDeleteModal(this)">
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+          {% empty %}
+            <div class="list-group-item">No sessions yet.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card glass">
+        <div class="card-header">
+          <h5 class="mb-0">Personas</h5>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-2">Choose a persona to shape how the AI responds.</p>
+          <div class="mb-3 d-flex flex-wrap gap-2" id="personaButtons">
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="student">Student</button>
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="professor">Professor</button>
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="researcher">Researcher</button>
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="friendly_tutor">Friendly Tutor</button>
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="technical_expert">Technical Expert</button>
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="creative_writer">Creative Writer</button>
+            <button type="button" class="btn btn-outline-primary btn-sm persona-btn" data-persona="socratic_guide">Socratic Guide</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-9">
+      <div class="card glass">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Chat Assistant</h5>
+          {% if active_session %}
+            <span class="badge bg-secondary">Session #{{ active_session.id }}</span>
+          {% endif %}
+        </div>
+        <div class="card-body chat-body">
+          <div class="chat-messages mb-3" id="chatMessages">
+            {% for m in chat_messages %}
+              <div class="d-flex mb-3">
+                {% if m.role == 'user' %}
+                  <div class="message-bubble ms-auto p-3 rounded bg-primary text-white">{{ m.content }}</div>
+                {% else %}
+                  <div class="message-bubble me-auto p-3 rounded bg-light">{{ m.content }}</div>
+                {% endif %}
+              </div>
+            {% empty %}
+              <p class="text-muted">Start the conversation by sending a message below.</p>
+            {% endfor %}
+          </div>
+
+          <form id="messageForm" method="post" action="{% url 'chat' %}">
+            {% csrf_token %}
+            {% if active_session %}
+              <input type="hidden" name="session_id" value="{{ active_session.id }}" />
+            {% endif %}
+            <div class="input-group align-items-stretch">
+              <!-- Context dropdown toggle as a plus icon on the left -->
+              <div class="dropdown me-2">
+                <button class="btn btn-primary btn-square dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Context">
+                  <i class="fas fa-plus"></i>
+                </button>
+                <div class="dropdown-menu dropdown-menu-start dropdown-menu-dark p-3" style="width: 340px; max-height: 300px; overflow-y: auto;">
+                  <form id="contextForm" method="post" action="{% url 'chat' %}">
+                    {% csrf_token %}
+                    {% if active_session %}
+                      <input type="hidden" name="session_id" value="{{ active_session.id }}" />
+                    {% endif %}
+                    <div class="mb-2"><strong>Select documents</strong></div>
+                    {% for d in documents %}
+                      <div class="form-check">
+                        <input class="form-check-input context-doc" type="checkbox" id="doc{{ d.id }}" name="documents" value="{{ d.id }}" {% if d.id in selected_doc_ids %}checked{% endif %}>
+                        <label class="form-check-label" for="doc{{ d.id }}">{{ d.title }} ({{ d.get_document_type_display }})</label>
+                      </div>
+                    {% endfor %}
+                  </form>
+                </div>
+              </div>
+              <textarea class="form-control" name="message" rows="2" placeholder="Type your message..."></textarea>
+              <button class="btn btn-primary" type="submit"><i class="fas fa-paper-plane me-2"></i>Send</button>
+              <!-- Hidden system prompt to submit with message -->
+              <input type="hidden" name="system_prompt" id="hiddenSystemPrompt">
+            </div>
+          </form>
+        </div>
+        {% block extra_js %}
+        <script>
+          (function(){
+            const el = document.getElementById('chatMessages');
+            if (el) {
+              el.scrollTop = el.scrollHeight;
+            }
+            // Auto-submit context on checkbox change
+            const ctxForm = document.getElementById('contextForm');
+            if (ctxForm) {
+              const inputs = ctxForm.querySelectorAll('.context-doc');
+              inputs.forEach((i) => {
+                i.addEventListener('change', function(){ ctxForm.submit(); });
+              });
+            }
+            // Copy system prompt into message form before sending
+            const msgForm = document.getElementById('messageForm');
+            const hiddenSys = document.getElementById('hiddenSystemPrompt');
+            if (msgForm && hiddenSys) {
+              msgForm.addEventListener('submit', function(){
+                try {
+                  const persona = localStorage.getItem(storageKeyPersona);
+                  const storedPrompt = localStorage.getItem(storageKeyPrompt);
+                  hiddenSys.value = storedPrompt || (persona ? PERSONA_PROMPTS[persona] : '');
+                } catch (e) {
+                  hiddenSys.value = '';
+                }
+              });
+            }
+
+            // Personas: map selections to prompts and persist per session
+            const SESSION_ID = "{{ active_session.id|default:'new' }}";
+            const PERSONA_PROMPTS = {
+              student: "You are a patient tutor. Explain concepts step-by-step with simple language and examples. Check understanding and suggest practice.",
+              professor: "You are a rigorous professor. Provide precise, well-structured, academic explanations with key definitions and references when relevant.",
+              researcher: "You are an analytical researcher. Synthesize evidence, compare approaches, note trade-offs and uncertainties, and recommend next steps.",
+              friendly_tutor: "You are a friendly tutor. Give approachable explanations, highlight intuition, and encourage the learner.",
+              technical_expert: "You are a technical expert. Provide detailed, accurate, implementation-oriented guidance with code or math where useful.",
+              creative_writer: "You are a creative writer. Craft engaging, vivid text while staying relevant and clear.",
+              socratic_guide: "You are a Socratic guide. Ask probing questions, lead the user to insight, and avoid giving full solutions outright."
+            };
+            const personaBtns = document.querySelectorAll('.persona-btn');
+            const storageKeyPersona = `chat_persona_${SESSION_ID}`;
+            const storageKeyPrompt = `chat_system_prompt_${SESSION_ID}`;
+            function setActive(btn){
+              personaBtns.forEach(b => b.classList.remove('active'));
+              if (btn) btn.classList.add('active');
+            }
+            function applyPersona(key){
+              const prompt = PERSONA_PROMPTS[key] || '';
+              try {
+                localStorage.setItem(storageKeyPersona, key);
+                localStorage.setItem(storageKeyPrompt, prompt);
+                if (hiddenSys) hiddenSys.value = prompt;
+              } catch (e) {}
+            }
+            personaBtns.forEach(btn => {
+              btn.addEventListener('click', function(){
+                const key = btn.getAttribute('data-persona');
+                applyPersona(key);
+                setActive(btn);
+              });
+            });
+            // Restore selection on load
+            try {
+              const savedPersona = localStorage.getItem(storageKeyPersona);
+              const savedPrompt = localStorage.getItem(storageKeyPrompt);
+              if (savedPrompt && hiddenSys) hiddenSys.value = savedPrompt;
+              if (savedPersona) {
+                const match = document.querySelector(`.persona-btn[data-persona="${savedPersona}"]`);
+                setActive(match);
+              }
+            } catch (e) {}
+          })();
+        </script>
+        {% endblock %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirmation modal -->
+<div class="modal fade" id="deleteSessionModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content glass">
+      <div class="modal-header">
+        <h5 class="modal-title">Delete chat session</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete <strong id="deleteSessionTitle"></strong>?</p>
+      </div>
+      <div class="modal-footer">
+        <form id="deleteSessionForm" method="post" class="m-0">
+          {% csrf_token %}
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  </div>
+
+<script>
+  function openDeleteModal(btn) {
+    const titleEl = document.getElementById('deleteSessionTitle');
+    const form = document.getElementById('deleteSessionForm');
+    const modalEl = document.getElementById('deleteSessionModal');
+    const name = btn.getAttribute('data-session-title');
+    const id = btn.getAttribute('data-session-id');
+    const url = btn.getAttribute('data-delete-url');
+    titleEl.textContent = `${name} #${id}`;
+    form.action = url;
+    if (window.bootstrap && bootstrap.Modal) {
+      const m = new bootstrap.Modal(modalEl);
+      m.show();
+    } else {
+      // Fallback: simple display if Bootstrap JS isn't available
+      modalEl.classList.add('show');
+      modalEl.style.display = 'block';
+    }
+  }
+</script>
+{% endblock %}

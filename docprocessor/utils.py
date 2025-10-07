@@ -9,7 +9,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 import re
 
 # Configure OpenAI API key
-openai.api_key = settings.OPENAI_API_KEY
+openai.api_key = os.getenv('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
@@ -131,3 +131,23 @@ def translate_text(text, target_language, source_language='auto', max_tokens=500
         return response.choices[0].message.content
     except Exception as e:
         return f"Error translating text: {str(e)}"
+
+def chat_with_openai(messages, system_prompt=None, model="gpt-3.5-turbo", max_tokens=800):
+    """Generic chat helper using OpenAI ChatCompletion.
+    - messages: list of dicts with roles and content
+    - system_prompt: optional system message to guide behavior
+    """
+    try:
+        final_messages = []
+        if system_prompt:
+            final_messages.append({"role": "system", "content": system_prompt})
+        final_messages.extend(messages)
+        response = openai.ChatCompletion.create(
+            model=model,
+            messages=final_messages,
+            max_tokens=max_tokens,
+            temperature=0.3,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error chatting with OpenAI: {str(e)}"

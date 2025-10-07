@@ -128,7 +128,7 @@ p, .text-muted { color: var(--text-muted); }
 .form-control, .form-select, textarea {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  color: var(--text-0);
+  color: #ffffff !important;
   border-radius: var(--radius-md);
 }
 .form-control:focus, .form-select:focus, textarea:focus {
@@ -141,7 +141,10 @@ p, .text-muted { color: var(--text-muted); }
 /* Form labels and helper text: improve visibility on dark backgrounds */
 label, .form-label { color: #e6edf7; }
 .form-text { color: #cbd5e1; }
-.form-control::placeholder { color: #cbd5e1; }
+.form-control::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.7) !important; }
+
+/* Ensure caret is visible on dark backgrounds */
+.form-control, textarea { caret-color: #ffffff; }
 
 /* File input button: match glossy primary style */
 input[type="file"] { color: #e6edf7; }
@@ -344,4 +347,98 @@ footer,
   color: #ffffff !important;
   background: rgba(255, 255, 255, 0.08) !important;
   border-color: rgba(230, 237, 247, 0.8) !important;
+}
+/* Chat page scrolling layout */
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  height: 70vh;
+  overflow: hidden;
+}
+.chat-messages {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  padding-right: 6px;
+}
+.chat-messages::-webkit-scrollbar { width: 8px; }
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+/* Result page scrolling: keep long outputs contained like chat */
+.result-scroll {
+  max-height: 65vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  padding-right: 6px;
+}
+.result-scroll::-webkit-scrollbar { width: 8px; }
+.result-scroll::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+/* Sessions list inside glass cards should match dark theme */
+.glass .list-group-item {
+  background: var(--glass-bg);
+  color: #ffffff;
+  border-color: var(--glass-border);
+}
+.glass .list-group-item-action:hover {
+  background: var(--glass-bg-strong);
+  color: #ffffff;
+}
+.glass .list-group-item.active {
+  background-color: var(--accent-indigo);
+  border-color: var(--accent-indigo);
+  color: #ffffff;
+}
+
+/* Prevent long text from pushing layout horizontally */
+.message-bubble {
+  max-width: 75%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+  .chat-body { height: 65vh; }
+  .message-bubble { max-width: 90%; }
+}
+/* Circular icon button for context dropdown */
+.btn-circle {
+  width: 42px;
+  height: 42px;
+  border-radius: 9999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Square icon button to match Send styling */
+.btn-square {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-content.glass {
+  background: var(--glass-bg);
+  color: #ffffff;
+  border: 1px solid var(--glass-border);
+}
+.modal-header, .modal-footer {
+  border-color: var(--glass-border);
+}
+.btn-close {
+  filter: invert(1);
 }

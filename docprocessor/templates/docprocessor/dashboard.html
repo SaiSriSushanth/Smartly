@@ -55,6 +55,15 @@
                                                 <a href="{% url 'process_document' document.id %}" class="btn btn-sm btn-outline-primary">
                                                     <i class="fas fa-eye"></i> View
                                                 </a>
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-danger"
+                                                        title="Delete"
+                                                        data-doc-id="{{ document.id }}"
+                                                        data-doc-title="{{ document.title }}"
+                                                        data-delete-url="{% url 'delete_document' document.id %}"
+                                                        onclick="openDeleteDocumentModal(this)">
+                                                    <i class="fas fa-trash-alt"></i> Delete
+                                                </button>
                                             </td>
                                         </tr>
                                     {% endfor %}
@@ -172,4 +181,45 @@
         </div>
     </div>
 </div>
+<!-- Delete Document confirmation modal -->
+<div class="modal fade" id="deleteDocumentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content glass">
+      <div class="modal-header">
+        <h5 class="modal-title">Delete document</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete <strong id="deleteDocumentTitle"></strong>? This cannot be undone.</p>
+      </div>
+      <div class="modal-footer">
+        <form id="deleteDocumentForm" method="post" class="m-0">
+          {% csrf_token %}
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openDeleteDocumentModal(btn) {
+    const titleEl = document.getElementById('deleteDocumentTitle');
+    const form = document.getElementById('deleteDocumentForm');
+    const modalEl = document.getElementById('deleteDocumentModal');
+    const title = btn.getAttribute('data-doc-title');
+    const id = btn.getAttribute('data-doc-id');
+    const url = btn.getAttribute('data-delete-url');
+    titleEl.textContent = `${title} (#${id})`;
+    form.action = url;
+    if (window.bootstrap && bootstrap.Modal) {
+      const m = new bootstrap.Modal(modalEl);
+      m.show();
+    } else {
+      modalEl.classList.add('show');
+      modalEl.style.display = 'block';
+    }
+  }
+</script>
 {% endblock %}

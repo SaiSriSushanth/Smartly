@@ -4,12 +4,24 @@ from .models import Document, YouTubeVideo
 class DocumentUploadForm(forms.ModelForm):
     class Meta:
         model = Document
-        fields = ['title', 'file', 'processing_type']
+        fields = ['title', 'file']
         widgets = {
             'title': forms.TextInput(attrs={'class': 'form-control'}),
             'file': forms.FileInput(attrs={'class': 'form-control'}),
-            'processing_type': forms.Select(attrs={'class': 'form-select'}),
         }
+
+class DocumentSelectForm(forms.Form):
+    document = forms.ModelChoiceField(
+        queryset=Document.objects.none(),
+        widget=forms.Select(attrs={'class': 'form-select'})
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        qs = Document.objects.all()
+        if user and getattr(user, 'is_authenticated', False):
+            qs = Document.objects.filter(user=user)
+        self.fields['document'].queryset = qs.order_by('-uploaded_at')
 
 class YouTubeURLForm(forms.ModelForm):
     class Meta:
