@@ -82,29 +82,3 @@ class ProcessedResult(models.Model):
     
     def __str__(self):
         return f"Result for {self.document.title}"
-
-class YouTubeVideo(models.Model):
-    url = models.URLField()
-    title = models.CharField(max_length=255, blank=True)
-    transcript = models.TextField(blank=True)
-    processed_at = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
-    
-    def __str__(self):
-        return self.title or self.url
-
-class YouTubeProcessedResult(models.Model):
-    PROCESSING_TYPES = (
-        ('summarize', 'Summarize'),
-        ('generate', 'Generate Answers'),
-        ('analyze', 'Analyze'),
-    )
-    youtube_video = models.ForeignKey(YouTubeVideo, on_delete=models.CASCADE, related_name='processed_results')
-    processing_type = models.CharField(max_length=20, choices=PROCESSING_TYPES)
-    result_text = models.TextField()
-    processed_at = models.DateTimeField(auto_now_add=True)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
-    
-    def __str__(self):
-        base = self.youtube_video.title or self.youtube_video.url
-        return f"{self.get_processing_type_display()} for {base}"
