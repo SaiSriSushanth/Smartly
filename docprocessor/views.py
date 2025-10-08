@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, ListFlowable, ListItem, Preformatted
@@ -27,21 +27,38 @@ def home(request):
     """Home page view"""
     return render(request, 'docprocessor/home.html')
 
+from django.core.paginator import Paginator
+from django.contrib.auth.decorators import login_required
+from django.db.models import Q
+
 def dashboard(request):
-    """Dashboard view showing user's documents and results"""
+    """Dashboard view showing user's documents and results with per-section pagination"""
     if request.user.is_authenticated:
-        documents = Document.objects.filter(user=request.user).order_by('-uploaded_at')
-        youtube_videos = YouTubeVideo.objects.filter(user=request.user).order_by('-processed_at')
-        youtube_results = YouTubeProcessedResult.objects.filter(user=request.user).order_by('-processed_at')
+        documents_qs = Document.objects.filter(user=request.user).order_by('-uploaded_at')
+        youtube_videos_qs = YouTubeVideo.objects.filter(user=request.user).order_by('-processed_at')
+        youtube_results_qs = YouTubeProcessedResult.objects.filter(user=request.user).order_by('-processed_at')
     else:
-        documents = Document.objects.all().order_by('-uploaded_at')
-        youtube_videos = YouTubeVideo.objects.all().order_by('-processed_at')
-        youtube_results = YouTubeProcessedResult.objects.all().order_by('-processed_at')
-    
+        documents_qs = Document.objects.all().order_by('-uploaded_at')
+        youtube_videos_qs = YouTubeVideo.objects.all().order_by('-processed_at')
+        youtube_results_qs = YouTubeProcessedResult.objects.all().order_by('-processed_at')
+
+    # Per-section pagination (5 items per page)
+    docs_paginator = Paginator(documents_qs, 5)
+    yt_paginator = Paginator(youtube_videos_qs, 5)
+    res_paginator = Paginator(youtube_results_qs, 5)
+
+    docs_page_number = request.GET.get('docs_page', 1)
+    yt_page_number = request.GET.get('yt_page', 1)
+    res_page_number = request.GET.get('res_page', 1)
+
+    documents_page = docs_paginator.get_page(docs_page_number)
+    youtube_videos_page = yt_paginator.get_page(yt_page_number)
+    youtube_results_page = res_paginator.get_page(res_page_number)
+
     context = {
-        'documents': documents,
-        'youtube_videos': youtube_videos,
-        'youtube_results': youtube_results,
+        'documents_page': documents_page,
+        'youtube_videos_page': youtube_videos_page,
+        'youtube_results_page': youtube_results_page,
     }
     return render(request, 'docprocessor/dashboard.html', context)
 
@@ -62,6 +79,38 @@ def delete_document(request, document_id):
             messages.success(request, f'Deleted "{title}" successfully.')
         except Exception as e:
             messages.error(request, f'Error deleting document: {e}')
+        return redirect('dashboard')
+    messages.warning(request, 'Invalid request method for delete.')
+    return redirect('dashboard')
+
+
+@login_required
+def delete_youtube_video(request, video_id):
+    """Delete a YouTubeVideo owned by the current user."""
+    youtube_video = get_object_or_404(YouTubeVideo, id=video_id, user=request.user)
+    if request.method == 'POST':
+        title = youtube_video.title or youtube_video.url
+        try:
+            youtube_video.delete()  # cascades to processed results via FK
+            messages.success(request, f'Deleted YouTube video "{title}" successfully.')
+        except Exception as e:
+            messages.error(request, f'Error deleting YouTube video: {e}')
+        return redirect('dashboard')
+    messages.warning(request, 'Invalid request method for delete.')
+    return redirect('dashboard')
+
+
+@login_required
+def delete_youtube_result(request, result_id):
+    """Delete a YouTubeProcessedResult owned by the current user."""
+    yt_result = get_object_or_404(YouTubeProcessedResult, id=result_id, user=request.user)
+    if request.method == 'POST':
+        base = yt_result.youtube_video.title or yt_result.youtube_video.url
+        try:
+            yt_result.delete()
+            messages.success(request, f'Deleted processed result for "{base}" successfully.')
+        except Exception as e:
+            messages.error(request, f'Error deleting processed result: {e}')
         return redirect('dashboard')
     messages.warning(request, 'Invalid request method for delete.')
     return redirect('dashboard')
@@ -638,6 +687,7 @@ def chat_view(request):
 
     # Handle new message submission
     if request.method == 'POST':
+        is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
         user_message = request.POST.get('message', '').strip()
         system_prompt = request.POST.get('system_prompt', '').strip() or "You are a helpful AI assistant."
         selected_ids = request.POST.getlist('documents')
@@ -683,6 +733,20 @@ def chat_view(request):
 
             # Save assistant message
             ChatMessage.objects.create(session=active_session, role='assistant', content=assistant_reply)
+
+            if is_ajax:
+                return JsonResponse({
+                    'session_id': active_session.id,
+                    'assistant_reply': assistant_reply,
+                })
+
+        # Only context change (no message)
+        if is_ajax and not user_message:
+            return JsonResponse({
+                'session_id': active_session.id,
+                'context_updated': True,
+                'selected_doc_ids': list(active_session.documents.values_list('id', flat=True))
+            })
 
         return redirect(f"{reverse('chat')}?session_id={active_session.id}")
 

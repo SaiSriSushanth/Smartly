@@ -26,13 +26,28 @@
         <div class="col-md-12">
             <div class="card glass">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Recent Documents {% if documents %}<span class="badge bg-secondary ms-2">{{ documents|length }}</span>{% endif %}</h5>
-                    <a href="{% url 'upload_document' %}" class="btn btn-primary btn-sm">
-                        <i class="fas fa-upload me-1"></i> Upload New
-                    </a>
+                    <h5 class="mb-0">Recent Documents {% if documents_page %}<span class="badge bg-secondary ms-2">{{ documents_page.paginator.count }}</span>{% endif %}</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        {% if documents_page and documents_page.has_previous %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.previous_page_number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Previous Page">
+                            <i class="fas fa-chevron-left"></i>
+                        </a>
+                        {% endif %}
+                        {% if documents_page %}
+                        <span class="text-muted small">Page {{ documents_page.number }} of {{ documents_page.paginator.num_pages }}</span>
+                        {% endif %}
+                        {% if documents_page and documents_page.has_next %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.next_page_number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Next Page">
+                            <i class="fas fa-chevron-right"></i>
+                        </a>
+                        {% endif %}
+                        <a href="{% url 'upload_document' %}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-upload me-1"></i> Upload New
+                        </a>
+                    </div>
                 </div>
                 <div class="card-body">
-                    {% if documents %}
+                    {% if documents_page and documents_page.object_list %}
                         <div class="table-responsive">
                             <table class="table table-hover">
                                 <thead>
@@ -45,7 +60,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for document in documents %}
+                                    {% for document in documents_page %}
                                         <tr>
                                             <td>{{ document.title }}</td>
                                             <td><span class="badge bg-secondary">{{ document.get_document_type_display }}</span></td>
@@ -87,11 +102,26 @@
     <div class="row">
         <div class="col-md-12">
             <div class="card glass">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">YouTube Videos</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        {% if youtube_videos_page and youtube_videos_page.has_previous %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.number }}&yt_page={{ youtube_videos_page.previous_page_number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Previous Page">
+                            <i class="fas fa-chevron-left"></i>
+                        </a>
+                        {% endif %}
+                        {% if youtube_videos_page %}
+                        <span class="text-muted small">Page {{ youtube_videos_page.number }} of {{ youtube_videos_page.paginator.num_pages }}</span>
+                        {% endif %}
+                        {% if youtube_videos_page and youtube_videos_page.has_next %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.number }}&yt_page={{ youtube_videos_page.next_page_number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Next Page">
+                            <i class="fas fa-chevron-right"></i>
+                        </a>
+                        {% endif %}
+                    </div>
                 </div>
                 <div class="card-body">
-                    {% if youtube_videos %}
+                    {% if youtube_videos_page and youtube_videos_page.object_list %}
                         <div class="table-responsive">
                             <table class="table table-hover">
                                 <thead>
@@ -102,7 +132,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for video in youtube_videos %}
+                                    {% for video in youtube_videos_page %}
                                         <tr>
                                             <td>{{ video.title|default:video.url }}</td>
                                             <td>{{ video.processed_at|date:"M d, Y" }}</td>
@@ -110,6 +140,15 @@
                                                 <a href="{{ video.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
                                                     <i class="fab fa-youtube"></i> View
                                                 </a>
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-danger"
+                                                        title="Delete"
+                                                        data-doc-id="{{ video.id }}"
+                                                        data-doc-title="{{ video.title|default:video.url }}"
+                                                        data-delete-url="{% url 'delete_youtube_video' video.id %}"
+                                                        onclick="openDeleteDocumentModal(this)">
+                                                    <i class="fas fa-trash-alt"></i> Delete
+                                                </button>
                                             </td>
                                         </tr>
                                     {% endfor %}
@@ -134,13 +173,28 @@
         <div class="col-md-12">
             <div class="card glass">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">YouTube Processed Results {% if youtube_results %}<span class="badge bg-secondary ms-2">{{ youtube_results|length }}</span>{% endif %}</h5>
-                    <a href="{% url 'accessibility' %}" class="btn btn-primary btn-sm">
-                        <i class="fab fa-youtube me-1"></i> Process New
-                    </a>
+                    <h5 class="mb-0">YouTube Processed Results {% if youtube_results_page %}<span class="badge bg-secondary ms-2">{{ youtube_results_page.paginator.count }}</span>{% endif %}</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        {% if youtube_results_page and youtube_results_page.has_previous %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.previous_page_number }}" class="btn btn-outline-secondary btn-sm" title="Previous Page">
+                            <i class="fas fa-chevron-left"></i>
+                        </a>
+                        {% endif %}
+                        {% if youtube_results_page %}
+                        <span class="text-muted small">Page {{ youtube_results_page.number }} of {{ youtube_results_page.paginator.num_pages }}</span>
+                        {% endif %}
+                        {% if youtube_results_page and youtube_results_page.has_next %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.next_page_number }}" class="btn btn-outline-secondary btn-sm" title="Next Page">
+                            <i class="fas fa-chevron-right"></i>
+                        </a>
+                        {% endif %}
+                        <a href="{% url 'accessibility' %}" class="btn btn-primary btn-sm">
+                            <i class="fab fa-youtube me-1"></i> Process New
+                        </a>
+                    </div>
                 </div>
                 <div class="card-body">
-                    {% if youtube_results %}
+                    {% if youtube_results_page and youtube_results_page.object_list %}
                         <div class="table-responsive">
                             <table class="table table-hover">
                                 <thead>
@@ -152,7 +206,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for res in youtube_results %}
+                                    {% for res in youtube_results_page %}
                                         <tr>
                                             <td>{{ res.youtube_video.title|default:res.youtube_video.url }}</td>
                                             <td><span class="badge bg-primary">{{ res.get_processing_type_display }}</span></td>
@@ -161,6 +215,15 @@
                                                 <a href="{% url 'youtube_result' res.id %}" class="btn btn-sm btn-outline-primary">
                                                     <i class="fas fa-eye"></i> View
                                                 </a>
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-danger"
+                                                        title="Delete"
+                                                        data-doc-id="{{ res.id }}"
+                                                        data-doc-title="{{ res.youtube_video.title|default:res.youtube_video.url }}"
+                                                        data-delete-url="{% url 'delete_youtube_result' res.id %}"
+                                                        onclick="openDeleteDocumentModal(this)">
+                                                    <i class="fas fa-trash-alt"></i> Delete
+                                                </button>
                                             </td>
                                         </tr>
                                     {% endfor %}

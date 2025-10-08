@@ -77,9 +77,7 @@
 
           <form id="messageForm" method="post" action="{% url 'chat' %}">
             {% csrf_token %}
-            {% if active_session %}
-              <input type="hidden" name="session_id" value="{{ active_session.id }}" />
-            {% endif %}
+            <input type="hidden" name="session_id" id="sessionIdMsg" value="{{ active_session.id|default:'' }}" />
             <div class="input-group align-items-stretch">
               <!-- Context dropdown toggle as a plus icon on the left -->
               <div class="dropdown me-2">
@@ -89,9 +87,7 @@
                 <div class="dropdown-menu dropdown-menu-start dropdown-menu-dark p-3" style="width: 340px; max-height: 300px; overflow-y: auto;">
                   <form id="contextForm" method="post" action="{% url 'chat' %}">
                     {% csrf_token %}
-                    {% if active_session %}
-                      <input type="hidden" name="session_id" value="{{ active_session.id }}" />
-                    {% endif %}
+                    <input type="hidden" name="session_id" id="sessionIdCtx" value="{{ active_session.id|default:'' }}" />
                     <div class="mb-2"><strong>Select documents</strong></div>
                     {% for d in documents %}
                       <div class="form-check">
@@ -116,19 +112,83 @@
             if (el) {
               el.scrollTop = el.scrollHeight;
             }
-            // Auto-submit context on checkbox change
+            // CSRF helper
+            function getCsrfToken(form){
+              const inp = form.querySelector('input[name="csrfmiddlewaretoken"]');
+              return inp ? inp.value : '';
+            }
+
+            // Append a message bubble
+            function appendMessage(role, content){
+              const wrap = document.createElement('div');
+              wrap.className = 'd-flex mb-3';
+              const bubble = document.createElement('div');
+              bubble.className = 'message-bubble p-3 rounded ' + (role === 'user' ? 'bg-primary text-white ms-auto' : 'bg-light me-auto');
+              bubble.textContent = content;
+              wrap.appendChild(bubble);
+              el.appendChild(wrap);
+              el.scrollTop = el.scrollHeight;
+            }
+
+            // Simple dedupe: if the last bubble for role matches, skip
+            function lastBubbleText(role){
+              const bubbles = el.querySelectorAll('.message-bubble');
+              for (let i = bubbles.length - 1; i >= 0; i--) {
+                const b = bubbles[i];
+                const isUser = b.classList.contains('bg-primary');
+                const isAssistant = b.classList.contains('bg-light');
+                if ((role === 'user' && isUser) || (role === 'assistant' && isAssistant)) {
+                  return b.textContent || '';
+                }
+              }
+              return '';
+            }
+
+            // Auto-submit context on checkbox change via AJAX
             const ctxForm = document.getElementById('contextForm');
             if (ctxForm) {
+              if (!ctxForm.dataset.bound) {
+                ctxForm.dataset.bound = '1';
               const inputs = ctxForm.querySelectorAll('.context-doc');
               inputs.forEach((i) => {
-                i.addEventListener('change', function(){ ctxForm.submit(); });
+                i.addEventListener('change', function(){
+                  const fd = new FormData(ctxForm);
+                  fetch(ctxForm.action, {
+                    method: 'POST',
+                    headers: {
+                      'X-Requested-With': 'XMLHttpRequest',
+                      'X-CSRFToken': getCsrfToken(ctxForm)
+                    },
+                    body: fd
+                  }).then(r => r.json()).then(data => {
+                    // If a new session was created, update hidden inputs
+                    if (data && data.session_id) {
+                      const msgSid = document.getElementById('sessionIdMsg');
+                      const ctxSid = document.getElementById('sessionIdCtx');
+                      if (msgSid) msgSid.value = data.session_id;
+                      if (ctxSid) ctxSid.value = data.session_id;
+                      const badge = document.querySelector('.card-header .badge');
+                      if (badge) badge.textContent = 'Session #' + data.session_id;
+                    }
+                  }).catch(() => {});
+                });
               });
+              }
             }
             // Copy system prompt into message form before sending
             const msgForm = document.getElementById('messageForm');
             const hiddenSys = document.getElementById('hiddenSystemPrompt');
             if (msgForm && hiddenSys) {
-              msgForm.addEventListener('submit', function(){
+              if (!msgForm.dataset.bound) {
+                msgForm.dataset.bound = '1';
+                let sending = false;
+                const sendBtn = msgForm.querySelector('button[type="submit"]');
+                msgForm.addEventListener('submit', function(e){
+                e.preventDefault();
+                if (sending) return; // prevent duplicate sends
+                sending = true;
+                let userText = msgForm.querySelector('textarea[name="message"]').value.trim();
+                if (!userText) return;
                 try {
                   const persona = localStorage.getItem(storageKeyPersona);
                   const storedPrompt = localStorage.getItem(storageKeyPrompt);
@@ -136,7 +196,44 @@
                 } catch (e) {
                   hiddenSys.value = '';
                 }
+                // Show user message immediately
+                if (lastBubbleText('user') !== userText) {
+                  appendMessage('user', userText);
+                }
+                if (sendBtn) sendBtn.disabled = true;
+                const fd = new FormData(msgForm);
+                fetch(msgForm.action, {
+                  method: 'POST',
+                  headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': getCsrfToken(msgForm)
+                  },
+                  body: fd
+                }).then(r => r.json()).then(data => {
+                  // Update session id if new
+                  if (data && data.session_id) {
+                    const msgSid = document.getElementById('sessionIdMsg');
+                    const ctxSid = document.getElementById('sessionIdCtx');
+                    if (msgSid) msgSid.value = data.session_id;
+                    if (ctxSid) ctxSid.value = data.session_id;
+                    const badge = document.querySelector('.card-header .badge');
+                    if (badge) badge.textContent = 'Session #' + data.session_id;
+                  }
+                  // Render assistant reply
+                  if (data && typeof data.assistant_reply === 'string') {
+                    if (lastBubbleText('assistant') !== data.assistant_reply) {
+                      appendMessage('assistant', data.assistant_reply);
+                    }
+                  }
+                  msgForm.querySelector('textarea[name="message"]').value = '';
+                }).catch(() => {
+                  // On error, do nothing or show a toast (not implemented)
+                }).finally(() => {
+                  sending = false;
+                  if (sendBtn) sendBtn.disabled = false;
+                });
               });
+              }
             }
 
             // Personas: map selections to prompts and persist per session
