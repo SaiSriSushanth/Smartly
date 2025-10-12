@@ -56,18 +56,21 @@
       <div class="card glass">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h5 class="mb-0">Chat Assistant</h5>
-          {% if active_session %}
-            <span class="badge bg-secondary">Session #{{ active_session.id }}</span>
-          {% endif %}
+          <div class="d-flex align-items-center gap-2">
+            <span id="activePersonaLabel" class="badge bg-info d-none"></span>
+            {% if active_session %}
+              <span class="badge bg-secondary">Session #{{ active_session.id }}</span>
+            {% endif %}
+          </div>
         </div>
         <div class="card-body chat-body">
           <div class="chat-messages mb-3" id="chatMessages">
             {% for m in chat_messages %}
               <div class="d-flex mb-3">
                 {% if m.role == 'user' %}
-                  <div class="message-bubble ms-auto p-3 rounded bg-primary text-white">{{ m.content }}</div>
+                  <div class="message-bubble ms-auto p-3 rounded bubble-user">{{ m.content }}</div>
                 {% else %}
-                  <div class="message-bubble me-auto p-3 rounded bg-light">{{ m.content }}</div>
+                  <div class="message-bubble me-auto p-3 rounded bubble-assistant">{{ m.content }}</div>
                 {% endif %}
               </div>
             {% empty %}
@@ -106,12 +109,35 @@
           </form>
         </div>
         {% block extra_js %}
+        <!-- KaTeX for LaTeX rendering -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
         <script>
           (function(){
             const el = document.getElementById('chatMessages');
             if (el) {
               el.scrollTop = el.scrollHeight;
             }
+            // Helper to render math once KaTeX is loaded
+            function renderMathTarget(target){
+              try {
+                if (window.renderMathInElement) {
+                  window.renderMathInElement(target, {
+                    delimiters: [
+                      {left: '$$', right: '$$', display: true},
+                      {left: '\\[', right: '\\]', display: true},
+                      {left: '$', right: '$', display: false}
+                    ],
+                    throwOnError: false
+                  });
+                }
+              } catch (e) {}
+            }
+            // Ensure initial messages render after all deferred scripts load
+            window.addEventListener('load', function(){
+              if (el) renderMathTarget(el);
+            });
             // CSRF helper
             function getCsrfToken(form){
               const inp = form.querySelector('input[name="csrfmiddlewaretoken"]');
@@ -123,10 +149,12 @@
               const wrap = document.createElement('div');
               wrap.className = 'd-flex mb-3';
               const bubble = document.createElement('div');
-              bubble.className = 'message-bubble p-3 rounded ' + (role === 'user' ? 'bg-primary text-white ms-auto' : 'bg-light me-auto');
+              bubble.className = 'message-bubble p-3 rounded ' + (role === 'user' ? 'bubble-user ms-auto' : 'bubble-assistant me-auto');
               bubble.textContent = content;
               wrap.appendChild(bubble);
               el.appendChild(wrap);
+              // Render LaTeX in the new bubble (after KaTeX loads)
+              renderMathTarget(bubble);
               el.scrollTop = el.scrollHeight;
             }
 
@@ -135,8 +163,8 @@
               const bubbles = el.querySelectorAll('.message-bubble');
               for (let i = bubbles.length - 1; i >= 0; i--) {
                 const b = bubbles[i];
-                const isUser = b.classList.contains('bg-primary');
-                const isAssistant = b.classList.contains('bg-light');
+                const isUser = b.classList.contains('bubble-user');
+                const isAssistant = b.classList.contains('bubble-assistant');
                 if ((role === 'user' && isUser) || (role === 'assistant' && isAssistant)) {
                   return b.textContent || '';
                 }
@@ -250,9 +278,22 @@
             const personaBtns = document.querySelectorAll('.persona-btn');
             const storageKeyPersona = `chat_persona_${SESSION_ID}`;
             const storageKeyPrompt = `chat_system_prompt_${SESSION_ID}`;
+            const personaLabelEl = document.getElementById('activePersonaLabel');
             function setActive(btn){
               personaBtns.forEach(b => b.classList.remove('active'));
               if (btn) btn.classList.add('active');
+            }
+            function setPersonaLabel(key){
+              if (!personaLabelEl) return;
+              const btn = document.querySelector(`.persona-btn[data-persona="${key}"]`);
+              const name = btn ? (btn.textContent || '').trim() : (key || '');
+              if (name) {
+                personaLabelEl.textContent = `Persona: ${name}`;
+                personaLabelEl.classList.remove('d-none');
+              } else {
+                personaLabelEl.textContent = '';
+                personaLabelEl.classList.add('d-none');
+              }
             }
             function applyPersona(key){
               const prompt = PERSONA_PROMPTS[key] || '';
@@ -260,6 +301,7 @@
                 localStorage.setItem(storageKeyPersona, key);
                 localStorage.setItem(storageKeyPrompt, prompt);
                 if (hiddenSys) hiddenSys.value = prompt;
+                setPersonaLabel(key);
               } catch (e) {}
             }
             personaBtns.forEach(btn => {
@@ -277,6 +319,7 @@
               if (savedPersona) {
                 const match = document.querySelector(`.persona-btn[data-persona="${savedPersona}"]`);
                 setActive(match);
+                setPersonaLabel(savedPersona);
               }
             } catch (e) {}
           })();

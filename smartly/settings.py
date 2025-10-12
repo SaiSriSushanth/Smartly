@@ -143,3 +143,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+# Tesseract OCR configuration
+# Prefer environment variables; fall back to standard Windows install paths.
+TESSERACT_CMD = os.getenv('TESSERACT_CMD', r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe")
+TESSDATA_PREFIX = os.getenv('TESSDATA_PREFIX', r"C:\\Program Files\\Tesseract-OCR\\tessdata")

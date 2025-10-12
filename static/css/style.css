@@ -363,6 +363,20 @@ footer,
   border-radius: var(--radius-md);
 }
 
+/* Dark-themed chat bubbles to match glass background */
+.message-bubble {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+}
+.bubble-user {
+  background: #2b3a4a; /* deep slate */
+  color: #e6edf7; /* light text */
+}
+.bubble-assistant {
+  background: #1e2a36; /* darker slate */
+  color: #e6edf7; /* light text */
+}
+
 /* Result page scrolling: keep long outputs contained like chat */
 .result-scroll {
   max-height: 65vh;

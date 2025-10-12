@@ -35,28 +35,34 @@ def dashboard(request):
     """Dashboard view showing user's documents and results with per-section pagination"""
     if request.user.is_authenticated:
         documents_qs = Document.objects.filter(user=request.user).order_by('-uploaded_at')
+        actions_qs = ProcessedResult.objects.filter(document__user=request.user).order_by('-processed_at')
         youtube_videos_qs = YouTubeVideo.objects.filter(user=request.user).order_by('-processed_at')
         youtube_results_qs = YouTubeProcessedResult.objects.filter(user=request.user).order_by('-processed_at')
     else:
         documents_qs = Document.objects.all().order_by('-uploaded_at')
+        actions_qs = ProcessedResult.objects.all().order_by('-processed_at')
         youtube_videos_qs = YouTubeVideo.objects.all().order_by('-processed_at')
         youtube_results_qs = YouTubeProcessedResult.objects.all().order_by('-processed_at')
 
     # Per-section pagination (5 items per page)
     docs_paginator = Paginator(documents_qs, 5)
+    actions_paginator = Paginator(actions_qs, 5)
     yt_paginator = Paginator(youtube_videos_qs, 5)
     res_paginator = Paginator(youtube_results_qs, 5)
 
     docs_page_number = request.GET.get('docs_page', 1)
+    actions_page_number = request.GET.get('actions_page', 1)
     yt_page_number = request.GET.get('yt_page', 1)
     res_page_number = request.GET.get('res_page', 1)
 
     documents_page = docs_paginator.get_page(docs_page_number)
+    actions_page = actions_paginator.get_page(actions_page_number)
     youtube_videos_page = yt_paginator.get_page(yt_page_number)
     youtube_results_page = res_paginator.get_page(res_page_number)
 
     context = {
         'documents_page': documents_page,
+        'actions_page': actions_page,
         'youtube_videos_page': youtube_videos_page,
         'youtube_results_page': youtube_results_page,
     }
@@ -79,6 +85,23 @@ def delete_document(request, document_id):
             messages.success(request, f'Deleted "{title}" successfully.')
         except Exception as e:
             messages.error(request, f'Error deleting document: {e}')
+        return redirect('dashboard')
+    messages.warning(request, 'Invalid request method for delete.')
+    return redirect('dashboard')
+
+@login_required
+def delete_processed_result(request, result_id):
+    """Delete a processed document result owned by the current user."""
+    pr = get_object_or_404(ProcessedResult, id=result_id)
+    if pr.document.user != request.user:
+        messages.error(request, 'You do not have permission to delete this result.')
+        return redirect('dashboard')
+    if request.method == 'POST':
+        try:
+            pr.delete()
+            messages.success(request, 'Deleted processed result successfully.')
+        except Exception as e:
+            messages.error(request, f'Error deleting processed result: {e}')
         return redirect('dashboard')
     messages.warning(request, 'Invalid request method for delete.')
     return redirect('dashboard')
@@ -218,6 +241,23 @@ def process_document(request, document_id):
         'document': document,
         'result': processed_result,
         'extracted_text': extracted_text
+    })
+
+def document_result_view(request, result_id):
+    """View a persisted processed result for a document."""
+    pr = get_object_or_404(ProcessedResult, id=result_id)
+    document = pr.document
+    # Reconstruct a minimal extracted_text preview if the file still exists
+    extracted_preview = ''
+    try:
+        if document.file and document.file.path:
+            extracted_preview = extract_text_from_file(document.file.path, document.document_type)[:1000]
+    except Exception:
+        extracted_preview = ''
+    return render(request, 'docprocessor/result.html', {
+        'document': document,
+        'result': pr,
+        'extracted_text': extracted_preview,
     })
 
 def process_multi_documents(request):

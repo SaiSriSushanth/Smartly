@@ -2,7 +2,7 @@ import os
 import PyPDF2
 import docx
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter
 import openai
 from django.conf import settings
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -10,6 +10,15 @@ import re
 
 # Configure OpenAI API key
 openai.api_key = os.getenv('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
+
+# Configure Tesseract OCR binary path if provided via env or settings
+_tesseract_cmd = os.getenv('TESSERACT_CMD') or getattr(settings, 'TESSERACT_CMD', None)
+if _tesseract_cmd:
+    try:
+        pytesseract.pytesseract.tesseract_cmd = _tesseract_cmd
+    except Exception:
+        # Silently ignore misconfig; we'll surface a clearer error during use
+        pass
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
@@ -29,13 +38,31 @@ def extract_text_from_docx(file_path):
     return text
 
 def extract_text_from_image(file_path):
-    """Extract text from image using OCR"""
+    """Extract text from image using OCR with light preprocessing.
+    - Supports JPG/PNG and similar raster formats.
+    - Applies grayscale + contrast + slight sharpening to improve OCR.
+    - Uses page segmentation mode suitable for blocks of text.
+    """
     try:
         image = Image.open(file_path)
-        text = pytesseract.image_to_string(image)
-        return text
+        # Convert to grayscale and lightly enhance contrast
+        img = ImageOps.grayscale(image)
+        img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=150, threshold=3))
+        # Optional light normalization for very dark or bright scans
+        img = ImageOps.autocontrast(img, cutoff=2)
+
+        # Use an OCR configuration tuned for uniform text blocks
+        ocr_config = "--psm 6"
+        text = pytesseract.image_to_string(img, config=ocr_config)
+        return text.strip()
+    except pytesseract.TesseractNotFoundError:
+        return (
+            "OCR not available: Tesseract binary not found. "
+            "Install Tesseract OCR and set TESSERACT_CMD to its path (e.g., "
+            "C:\\Program Files\\Tesseract-OCR\\tesseract.exe on Windows)."
+        )
     except Exception as e:
-        return f"Error extracting text: {str(e)}"
+        return f"Error extracting text from image: {str(e)}"
 
 def extract_text_from_file(file_path, file_type):
     """Extract text from file based on file type"""

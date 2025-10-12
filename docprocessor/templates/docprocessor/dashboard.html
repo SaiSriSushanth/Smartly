@@ -23,13 +23,14 @@
     </div>
     
     <div class="row mb-4">
-        <div class="col-md-12">
+        <!-- Left: Current Uploaded Documents -->
+        <div class="col-md-6">
             <div class="card glass">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Recent Documents {% if documents_page %}<span class="badge bg-secondary ms-2">{{ documents_page.paginator.count }}</span>{% endif %}</h5>
+                    <h5 class="mb-0">Current Documents {% if documents_page %}<span class="badge bg-secondary ms-2">{{ documents_page.paginator.count }}</span>{% endif %}</h5>
                     <div class="d-flex align-items-center gap-2">
                         {% if documents_page and documents_page.has_previous %}
-                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.previous_page_number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Previous Page">
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.previous_page_number }}&actions_page={{ actions_page.number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Previous Page">
                             <i class="fas fa-chevron-left"></i>
                         </a>
                         {% endif %}
@@ -37,7 +38,7 @@
                         <span class="text-muted small">Page {{ documents_page.number }} of {{ documents_page.paginator.num_pages }}</span>
                         {% endif %}
                         {% if documents_page and documents_page.has_next %}
-                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.next_page_number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Next Page">
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.next_page_number }}&actions_page={{ actions_page.number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Next Page">
                             <i class="fas fa-chevron-right"></i>
                         </a>
                         {% endif %}
@@ -54,7 +55,6 @@
                                     <tr>
                                         <th>Title</th>
                                         <th>Type</th>
-                                        <th>Processing</th>
                                         <th>Date</th>
                                         <th>Actions</th>
                                     </tr>
@@ -64,12 +64,19 @@
                                         <tr>
                                             <td>{{ document.title }}</td>
                                             <td><span class="badge bg-secondary">{{ document.get_document_type_display }}</span></td>
-                                            <td><span class="badge bg-primary">{{ document.get_processing_type_display }}</span></td>
                                             <td>{{ document.uploaded_at|date:"M d, Y" }}</td>
                                             <td>
-                                                <a href="{% url 'process_document' document.id %}" class="btn btn-sm btn-outline-primary">
+                                                {% with last_result=document.results.last %}
+                                                {% if last_result %}
+                                                <a href="{% url 'document_result' last_result.id %}" class="btn btn-sm btn-outline-primary">
                                                     <i class="fas fa-eye"></i> View
                                                 </a>
+                                                {% else %}
+                                                <a href="{% url 'process_document' document.id %}" class="btn btn-sm btn-outline-primary" title="Run processing">
+                                                    <i class="fas fa-play"></i> Run
+                                                </a>
+                                                {% endif %}
+                                                {% endwith %}
                                                 <button type="button"
                                                         class="btn btn-sm btn-outline-danger"
                                                         title="Delete"
@@ -92,6 +99,77 @@
                             <a href="{% url 'upload_document' %}" class="btn btn-primary">
                                 <i class="fas fa-upload me-2"></i>Upload Your First Document
                             </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Recent Actions -->
+        <div class="col-md-6">
+            <div class="card glass">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Recent Actions {% if actions_page %}<span class="badge bg-secondary ms-2">{{ actions_page.paginator.count }}</span>{% endif %}</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        {% if actions_page and actions_page.has_previous %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.number }}&actions_page={{ actions_page.previous_page_number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Previous Page">
+                            <i class="fas fa-chevron-left"></i>
+                        </a>
+                        {% endif %}
+                        {% if actions_page %}
+                        <span class="text-muted small">Page {{ actions_page.number }} of {{ actions_page.paginator.num_pages }}</span>
+                        {% endif %}
+                        {% if actions_page and actions_page.has_next %}
+                        <a href="{% url 'dashboard' %}?docs_page={{ documents_page.number }}&actions_page={{ actions_page.next_page_number }}&yt_page={{ youtube_videos_page.number }}&res_page={{ youtube_results_page.number }}" class="btn btn-outline-secondary btn-sm" title="Next Page">
+                            <i class="fas fa-chevron-right"></i>
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if actions_page and actions_page.object_list %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Document</th>
+                                        <th>Type</th>
+                                        <th>Processed</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for pr in actions_page %}
+                                        <tr>
+                                            <td>{{ pr.document.title }}</td>
+                                            <td><span class="badge bg-primary">{{ pr.document.get_processing_type_display }}</span></td>
+                                            <td>{{ pr.processed_at|date:"M d, Y" }}</td>
+                                            <td>
+                                                <a href="{% url 'document_result' pr.id %}" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                                <a href="{% url 'download_result_pdf' pr.id %}" class="btn btn-sm btn-outline-secondary" title="Download PDF">
+                                                    <i class="fas fa-file-pdf"></i> PDF
+                                                </a>
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-danger"
+                                                        title="Delete"
+                                                        data-doc-id="{{ pr.id }}"
+                                                        data-doc-title="{{ pr.document.title }}"
+                                                        data-delete-url="{% url 'delete_processed_result' pr.id %}"
+                                                        onclick="openDeleteDocumentModal(this)">
+                                                    <i class="fas fa-trash-alt"></i> Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-tasks fa-3x mb-3 text-muted"></i>
+                            <p>No actions yet.</p>
                         </div>
                     {% endif %}
                 </div>
