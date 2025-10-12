@@ -69,15 +69,24 @@ def get_youtube_transcript(video_id):
     except Exception as e:
         return f"Error getting transcript: {str(e)}"
 
-def summarize_text(text, target_words=None, max_tokens=500):
-    """Summarize text using OpenAI API, allowing target word count in prompt"""
+def summarize_text(text, target_words=None, max_tokens=500, preset=None):
+    """Summarize text using OpenAI API with optional preset formatting."""
     try:
         word_instruction = "" if not target_words else f" in approximately {int(target_words)} words"
+        preset_instruction = ""
+        if preset == 'bullet_points':
+            preset_instruction = "Format strictly as a markdown bullet list. Use '-' at the start of each line. No introduction or conclusion. Keep bullets concise and study-friendly."
+        elif preset == 'detailed_summary':
+            preset_instruction = " Provide a comprehensive paragraph-style summary."
+        elif preset == 'study_notes':
+            preset_instruction = " Produce study notes: headings for topics, sub-bullets for key concepts and definitions."
+        elif preset == 'brief_summary':
+            preset_instruction = " Keep it brief for quick revision."
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that summarizes text clearly and faithfully."},
-                {"role": "user", "content": f"Summarize the following text{word_instruction}. Avoid omitting key points.\n\n{text}"}
+                {"role": "user", "content": f"Summarize the following text{word_instruction} and {preset_instruction} Avoid omitting key points.\n\n{text}"}
             ],
             max_tokens=max_tokens
         )
@@ -85,15 +94,22 @@ def summarize_text(text, target_words=None, max_tokens=500):
     except Exception as e:
         return f"Error summarizing text: {str(e)}"
 
-def generate_answers(text, target_words=None, max_tokens=500):
-    """Generate answers using OpenAI API, allowing target word count in prompt"""
+def generate_answers(text, target_words=None, max_tokens=500, preset=None):
+    """Generate answers using OpenAI API with optional preset type."""
     try:
         word_instruction = "" if not target_words else f" in approximately {int(target_words)} words"
+        preset_instruction = ""
+        if preset == 'exam_answers':
+            preset_instruction = " Generate comprehensive, step-by-step exam answers. Use numbered steps and short headings for clarity."
+        elif preset == 'practice_questions':
+            preset_instruction = " Create 6-10 practice questions with detailed answers. Format as a numbered list where each item contains 'Q:' followed by the question and 'A:' followed by the answer."
+        elif preset == 'study_plan':
+            preset_instruction = " Draft a personalized study schedule. Use a bullet list grouped by days/weeks with time blocks and goals."
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that generates accurate, well-structured answers."},
-                {"role": "user", "content": f"Generate clear, step-by-step answers{word_instruction} to the following questions or content:\n\n{text}"}
+                {"role": "user", "content": f"Generate clear, step-by-step answers{word_instruction} to the following questions or content.{preset_instruction}\n\n{text}"}
             ],
             max_tokens=max_tokens
         )
@@ -101,15 +117,22 @@ def generate_answers(text, target_words=None, max_tokens=500):
     except Exception as e:
         return f"Error generating answers: {str(e)}"
 
-def analyze_text(text, target_words=None, max_tokens=500):
-    """Analyze text using OpenAI API, allowing target word count in prompt"""
+def analyze_text(text, target_words=None, max_tokens=500, preset=None):
+    """Analyze text using OpenAI API with optional preset for analysis type."""
     try:
         word_instruction = "" if not target_words else f" in approximately {int(target_words)} words"
+        preset_instruction = ""
+        if preset == 'question_patterns':
+            preset_instruction = " Identify recurring question patterns and topics. Output a bullet list. For each pattern, include a short label and 1-2 example phrasings."
+        elif preset == 'predict_questions':
+            preset_instruction = " Predict likely exam questions based on the content. Output as a numbered list of questions only, optionally include one-sentence rationale per item."
+        elif preset == 'topic_importance':
+            preset_instruction = " Rank topics by exam importance as a numbered list from most to least important, with a brief justification for each."
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that analyzes text and ranks topics by importance."},
-                {"role": "user", "content": f"Analyze the following text, identify key insights, and rank topics by importance{word_instruction}.\n\n{text}"}
+                {"role": "user", "content": f"Analyze the following text, identify key insights, and rank topics by importance{word_instruction}.{preset_instruction}\n\n{text}"}
             ],
             max_tokens=max_tokens
         )

@@ -23,6 +23,19 @@ class DocumentSelectForm(forms.Form):
             qs = Document.objects.filter(user=user)
         self.fields['document'].queryset = qs.order_by('-uploaded_at')
 
+class DocumentMultiSelectForm(forms.Form):
+    documents = forms.ModelMultipleChoiceField(
+        queryset=Document.objects.none(),
+        widget=forms.SelectMultiple(attrs={'class': 'form-select'})
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        qs = Document.objects.all()
+        if user and getattr(user, 'is_authenticated', False):
+            qs = Document.objects.filter(user=user)
+        self.fields['documents'].queryset = qs.order_by('-uploaded_at')
+
 class YouTubeURLForm(forms.ModelForm):
     class Meta:
         model = YouTubeVideo

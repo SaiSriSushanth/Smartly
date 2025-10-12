@@ -7,6 +7,7 @@ urlpatterns = [
     path('dashboard/', views.dashboard, name='dashboard'),
     path('upload/', views.upload_document, name='upload_document'),
     path('process/<int:document_id>/', views.process_document, name='process_document'),
+    path('process/multi/', views.process_multi_documents, name='process_multi_documents'),
     path('document/<int:document_id>/delete/', views.delete_document, name='delete_document'),
     path('youtube/video/<int:video_id>/delete/', views.delete_youtube_video, name='delete_youtube_video'),
     path('youtube/result/<int:result_id>/delete/', views.delete_youtube_result, name='delete_youtube_result'),

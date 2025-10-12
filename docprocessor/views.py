@@ -15,7 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth import login as auth_login
 from .models import Document, ProcessedResult, YouTubeVideo, YouTubeProcessedResult, ChatSession, ChatMessage
-from .forms import DocumentUploadForm, DocumentSelectForm, YouTubeURLForm, TranslationForm
+from .forms import DocumentUploadForm, DocumentSelectForm, DocumentMultiSelectForm, YouTubeURLForm, TranslationForm
 from .utils import (
     extract_text_from_file, summarize_text, generate_answers, 
     analyze_text, translate_text, get_youtube_video_id, 
@@ -192,13 +192,16 @@ def process_document(request, document_id):
     if not max_tokens:
         max_tokens = 800
 
+    # Optional preset param to shape output format/type
+    preset_param = request.GET.get('preset')
+
     # Process the text based on the selected processing type
     if document.processing_type == 'summarize':
-        result_text = summarize_text(extracted_text, target_words=target_words, max_tokens=max_tokens)
+        result_text = summarize_text(extracted_text, target_words=target_words, max_tokens=max_tokens, preset=preset_param)
     elif document.processing_type == 'generate':
-        result_text = generate_answers(extracted_text, target_words=target_words, max_tokens=max_tokens)
+        result_text = generate_answers(extracted_text, target_words=target_words, max_tokens=max_tokens, preset=preset_param)
     elif document.processing_type == 'analyze':
-        result_text = analyze_text(extracted_text, target_words=target_words, max_tokens=max_tokens)
+        result_text = analyze_text(extracted_text, target_words=target_words, max_tokens=max_tokens, preset=preset_param)
     elif document.processing_type == 'translate':
         # Default to English translation
         result_text = translate_text(extracted_text, 'English', max_tokens=max_tokens)
@@ -215,6 +218,85 @@ def process_document(request, document_id):
         'document': document,
         'result': processed_result,
         'extracted_text': extracted_text
+    })
+
+def process_multi_documents(request):
+    """Process multiple documents together, combining text and honoring preset."""
+    ids_param = request.GET.get('ids', '')
+    type_param = request.GET.get('type', '').lower()
+    preset_param = request.GET.get('preset')
+    words_param = request.GET.get('words')
+    tokens_param = request.GET.get('tokens')
+    length_param = request.GET.get('length')
+
+    id_list = [int(x) for x in ids_param.split(',') if x.strip().isdigit()]
+    if not id_list:
+        messages.error(request, 'No documents selected for processing.')
+        return redirect('dashboard')
+
+    documents = Document.objects.filter(id__in=id_list)
+    if request.user.is_authenticated:
+        documents = documents.filter(user=request.user)
+    documents = list(documents)
+    if not documents:
+        messages.error(request, 'Selected documents not found.')
+        return redirect('dashboard')
+
+    # Establish processing type on the first document for display/persistence
+    anchor = documents[0]
+    if type_param in ['summarize', 'generate', 'analyze']:
+        anchor.processing_type = type_param
+        anchor.save(update_fields=['processing_type'])
+
+    # Build combined text with simple headers
+    combined_parts = []
+    for doc in documents:
+        try:
+            txt = extract_text_from_file(doc.file.path, doc.document_type)
+        except Exception:
+            txt = ''
+        if txt:
+            combined_parts.append(f"## {doc.title}\n\n{txt}")
+    combined_text = '\n\n'.join(combined_parts)
+
+    # Compute token/word budgets
+    try:
+        target_words = int(words_param) if words_param else None
+    except (TypeError, ValueError):
+        target_words = None
+    try:
+        max_tokens = int(tokens_param) if tokens_param else None
+    except (TypeError, ValueError):
+        max_tokens = None
+    if not max_tokens and target_words:
+        max_tokens = min(3800, max(256, int(target_words) * 3))
+    if not max_tokens and length_param:
+        length_map = {'short': 200, 'medium': 500, 'long': 1000}
+        max_tokens = length_map.get(length_param.lower())
+    if not max_tokens:
+        max_tokens = 800
+
+    # Process according to type
+    if type_param == 'summarize':
+        result_text = summarize_text(combined_text, target_words=target_words, max_tokens=max_tokens, preset=preset_param)
+    elif type_param == 'generate':
+        result_text = generate_answers(combined_text, target_words=target_words, max_tokens=max_tokens, preset=preset_param)
+    else:
+        result_text = analyze_text(combined_text, target_words=target_words, max_tokens=max_tokens, preset=preset_param)
+
+    # Note sources in the result
+    titles = ', '.join([d.title for d in documents])
+    result_text = f"Sources: {titles}\n\n" + (result_text or '')
+
+    processed_result = ProcessedResult.objects.create(
+        document=anchor,
+        result_text=result_text
+    )
+
+    return render(request, 'docprocessor/result.html', {
+        'document': anchor,
+        'result': processed_result,
+        'extracted_text': combined_text
     })
 
 def summarize_view(request):
@@ -240,11 +322,17 @@ def summarize_view(request):
             elif file_extension in ['.jpg', '.jpeg', '.png']:
                 document.document_type = 'image'
             
-            # Preserve words from slider to processing step
+            # Preserve words from slider and selected preset to processing step
             redirect_url = reverse('process_document', kwargs={'document_id': document.id})
             words_val = request.POST.get('words')
+            preset_val = request.POST.get('preset')
+            params = []
             if words_val:
-                redirect_url = f"{redirect_url}?words={words_val}"
+                params.append(f"words={words_val}")
+            if preset_val:
+                params.append(f"preset={preset_val}")
+            if params:
+                redirect_url = f"{redirect_url}?{'&'.join(params)}"
             return redirect(redirect_url)
     else:
         select_form = DocumentSelectForm(user=request.user)
@@ -296,30 +384,45 @@ def generate_view(request):
     external_result = None
     external_source = None
     if request.method == 'POST':
-        select_form = DocumentSelectForm(request.POST, user=request.user)
+        select_form = DocumentMultiSelectForm(request.POST, user=request.user)
         if select_form.is_valid():
-            document = select_form.cleaned_data['document']
-            document.processing_type = 'generate'
-            document.save(update_fields=['processing_type'])
-            
-            # Determine document type based on file extension
-            file_extension = os.path.splitext(document.file.name)[1].lower()
-            if file_extension in ['.pdf']:
-                document.document_type = 'pdf'
-            elif file_extension in ['.docx', '.doc']:
-                document.document_type = 'docx'
-            elif file_extension in ['.txt']:
-                document.document_type = 'txt'
-            elif file_extension in ['.jpg', '.jpeg', '.png']:
-                document.document_type = 'image'
-            
-            redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+            documents = list(select_form.cleaned_data['documents'])
+            preset_val = request.POST.get('preset') or 'exam_answers'
             words_val = request.POST.get('words')
-            if words_val:
-                redirect_url = f"{redirect_url}?words={words_val}"
-            return redirect(redirect_url)
+            if len(documents) <= 1:
+                document = documents[0]
+                document.processing_type = 'generate'
+                document.save(update_fields=['processing_type'])
+                # Determine document type based on file extension
+                file_extension = os.path.splitext(document.file.name)[1].lower()
+                if file_extension in ['.pdf']:
+                    document.document_type = 'pdf'
+                elif file_extension in ['.docx', '.doc']:
+                    document.document_type = 'docx'
+                elif file_extension in ['.txt']:
+                    document.document_type = 'txt'
+                elif file_extension in ['.jpg', '.jpeg', '.png']:
+                    document.document_type = 'image'
+                redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+                params = []
+                if words_val:
+                    params.append(f"words={words_val}")
+                if preset_val:
+                    params.append(f"preset={preset_val}")
+                if params:
+                    redirect_url = f"{redirect_url}?{'&'.join(params)}"
+                return redirect(redirect_url)
+            else:
+                ids = ','.join(str(d.id) for d in documents)
+                redirect_url = reverse('process_multi_documents')
+                params = [f"ids={ids}", "type=generate"]
+                if words_val:
+                    params.append(f"words={words_val}")
+                if preset_val:
+                    params.append(f"preset={preset_val}")
+                return redirect(f"{redirect_url}?{'&'.join(params)}")
     else:
-        select_form = DocumentSelectForm(user=request.user)
+        select_form = DocumentMultiSelectForm(user=request.user)
         youtube_id = request.GET.get('youtube_id')
         words_param = request.GET.get('words')
         tokens_param = request.GET.get('tokens')
@@ -367,30 +470,45 @@ def analyze_view(request):
     external_result = None
     external_source = None
     if request.method == 'POST':
-        select_form = DocumentSelectForm(request.POST, user=request.user)
+        select_form = DocumentMultiSelectForm(request.POST, user=request.user)
         if select_form.is_valid():
-            document = select_form.cleaned_data['document']
-            document.processing_type = 'analyze'
-            document.save(update_fields=['processing_type'])
-            
-            # Determine document type based on file extension
-            file_extension = os.path.splitext(document.file.name)[1].lower()
-            if file_extension in ['.pdf']:
-                document.document_type = 'pdf'
-            elif file_extension in ['.docx', '.doc']:
-                document.document_type = 'docx'
-            elif file_extension in ['.txt']:
-                document.document_type = 'txt'
-            elif file_extension in ['.jpg', '.jpeg', '.png']:
-                document.document_type = 'image'
-            
-            redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+            documents = list(select_form.cleaned_data['documents'])
+            preset_val = request.POST.get('preset') or 'question_patterns'
             words_val = request.POST.get('words')
-            if words_val:
-                redirect_url = f"{redirect_url}?words={words_val}"
-            return redirect(redirect_url)
+            if len(documents) <= 1:
+                document = documents[0]
+                document.processing_type = 'analyze'
+                document.save(update_fields=['processing_type'])
+                # Determine document type based on file extension
+                file_extension = os.path.splitext(document.file.name)[1].lower()
+                if file_extension in ['.pdf']:
+                    document.document_type = 'pdf'
+                elif file_extension in ['.docx', '.doc']:
+                    document.document_type = 'docx'
+                elif file_extension in ['.txt']:
+                    document.document_type = 'txt'
+                elif file_extension in ['.jpg', '.jpeg', '.png']:
+                    document.document_type = 'image'
+                redirect_url = reverse('process_document', kwargs={'document_id': document.id})
+                params = []
+                if words_val:
+                    params.append(f"words={words_val}")
+                if preset_val:
+                    params.append(f"preset={preset_val}")
+                if params:
+                    redirect_url = f"{redirect_url}?{'&'.join(params)}"
+                return redirect(redirect_url)
+            else:
+                ids = ','.join(str(d.id) for d in documents)
+                redirect_url = reverse('process_multi_documents')
+                params = [f"ids={ids}", "type=analyze"]
+                if words_val:
+                    params.append(f"words={words_val}")
+                if preset_val:
+                    params.append(f"preset={preset_val}")
+                return redirect(f"{redirect_url}?{'&'.join(params)}")
     else:
-        select_form = DocumentSelectForm(user=request.user)
+        select_form = DocumentMultiSelectForm(user=request.user)
         youtube_id = request.GET.get('youtube_id')
         words_param = request.GET.get('words')
         tokens_param = request.GET.get('tokens')
