@@ -56,8 +56,12 @@
       <div class="card glass">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h5 class="mb-0">Chat Assistant</h5>
-          <div class="d-flex align-items-center gap-2">
+          <div class="d-flex align-items-center gap-3">
             <span id="activePersonaLabel" class="badge bg-info d-none"></span>
+            <div class="form-check form-switch m-0" title="When enabled, answers use ONLY selected document context.">
+              <input class="form-check-input" type="checkbox" id="focusModeToggle">
+              <label class="form-check-label" for="focusModeToggle">Focus Mode</label>
+            </div>
             {% if active_session %}
               <span class="badge bg-secondary">Session #{{ active_session.id }}</span>
             {% endif %}
@@ -105,6 +109,8 @@
               <button class="btn btn-primary" type="submit"><i class="fas fa-paper-plane me-2"></i>Send</button>
               <!-- Hidden system prompt to submit with message -->
               <input type="hidden" name="system_prompt" id="hiddenSystemPrompt">
+              <!-- Hidden focus mode flag -->
+              <input type="hidden" name="focus_mode" id="focusModeInput" value="0">
             </div>
           </form>
         </div>
@@ -279,6 +285,9 @@
             const storageKeyPersona = `chat_persona_${SESSION_ID}`;
             const storageKeyPrompt = `chat_system_prompt_${SESSION_ID}`;
             const personaLabelEl = document.getElementById('activePersonaLabel');
+            const focusToggle = document.getElementById('focusModeToggle');
+            const focusHidden = document.getElementById('focusModeInput');
+            const storageKeyFocus = `chat_focus_mode_${SESSION_ID}`;
             function setActive(btn){
               personaBtns.forEach(b => b.classList.remove('active'));
               if (btn) btn.classList.add('active');
@@ -304,6 +313,18 @@
                 setPersonaLabel(key);
               } catch (e) {}
             }
+            // Focus Mode sync helpers
+            function setFocusMode(val){
+              const on = !!val;
+              try { localStorage.setItem(storageKeyFocus, on ? '1' : '0'); } catch (e) {}
+              if (focusHidden) focusHidden.value = on ? '1' : '0';
+              if (focusToggle) focusToggle.checked = on;
+            }
+            if (focusToggle) {
+              focusToggle.addEventListener('change', function(){
+                setFocusMode(focusToggle.checked);
+              });
+            }
             personaBtns.forEach(btn => {
               btn.addEventListener('click', function(){
                 const key = btn.getAttribute('data-persona');
@@ -315,12 +336,14 @@
             try {
               const savedPersona = localStorage.getItem(storageKeyPersona);
               const savedPrompt = localStorage.getItem(storageKeyPrompt);
+              const savedFocus = localStorage.getItem(storageKeyFocus);
               if (savedPrompt && hiddenSys) hiddenSys.value = savedPrompt;
               if (savedPersona) {
                 const match = document.querySelector(`.persona-btn[data-persona="${savedPersona}"]`);
                 setActive(match);
                 setPersonaLabel(savedPersona);
               }
+              setFocusMode(savedFocus === '1');
             } catch (e) {}
           })();
         </script>

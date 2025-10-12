@@ -848,6 +848,8 @@ def chat_view(request):
         is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
         user_message = request.POST.get('message', '').strip()
         system_prompt = request.POST.get('system_prompt', '').strip() or "You are a helpful AI assistant."
+        focus_mode = request.POST.get('focus_mode', '0').strip()
+        focus_only = focus_mode in ('1', 'true', 'on')
         selected_ids = request.POST.getlist('documents')
 
         if not active_session:
@@ -879,15 +881,31 @@ def chat_view(request):
             context_text = "\n\n".join(context_snippets)
 
             # Prepare chat history messages
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in active_session.messages.order_by('created_at')
-            ]
+            if focus_only:
+                # Strict focus: only current message and provided document context
+                history = [
+                    {"role": "user", "content": user_message}
+                ]
+            else:
+                history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in active_session.messages.order_by('created_at')
+                ]
             if context_text:
                 history.insert(0, {"role": "system", "content": f"Context from selected documents:\n{context_text}"})
 
+            # Strengthen persona prompt when in focus-only mode
+            system_prompt_final = system_prompt
+            if focus_only:
+                system_prompt_final = (
+                    system_prompt +
+                    "\n\nFocus Mode: Answer strictly using ONLY the provided document context. "
+                    "If information is not present, say 'Out of scope' and request clarifying details. "
+                    "Do not use external knowledge."
+                )
+
             # Call OpenAI
-            assistant_reply = chat_with_openai(history, system_prompt=system_prompt, max_tokens=800)
+            assistant_reply = chat_with_openai(history, system_prompt=system_prompt_final, max_tokens=800)
 
             # Save assistant message
             ChatMessage.objects.create(session=active_session, role='assistant', content=assistant_reply)
