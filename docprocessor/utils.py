@@ -7,6 +7,10 @@ import openai
 from django.conf import settings
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
+import json
+from urllib import request as urlrequest
+from urllib.error import URLError, HTTPError
+from urllib.parse import urlencode
 
 # Configure OpenAI API key
 openai.api_key = os.getenv('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
@@ -181,6 +185,217 @@ def translate_text(text, target_language, source_language='auto', max_tokens=500
         return response.choices[0].message.content
     except Exception as e:
         return f"Error translating text: {str(e)}"
+
+def translate_text_free(text, target_language_code, source_language_code='auto'):
+    """Translate text using the free LibreTranslate API.
+    - Tries multiple public endpoints for resilience.
+    - Falls back to form-encoded POST if JSON fails.
+    - Splits large inputs into chunks to avoid payload limits.
+    - Does not require any API key.
+    - target_language_code: e.g., 'es', 'fr', 'de', 'hi', 'en'.
+    """
+    endpoints = [
+        'https://libretranslate.de/translate',
+        'https://translate.argosopentech.com/translate',
+        'https://translate.astian.org/translate',
+        'https://libretranslate.com/translate',
+    ]
+
+    def _detect_language(sample_text):
+        """Detect language using LibreTranslate /detect endpoint across fallbacks.
+        Returns a language code or None if detection fails.
+        """
+        sample = (sample_text or '').strip()
+        if not sample:
+            return None
+        sample = sample[:1000]
+        detect_paths = [e.replace('/translate', '/detect') for e in endpoints]
+        payload = {'q': sample}
+        # Try JSON then form-encoded for each endpoint
+        for endpoint in detect_paths:
+            try:
+                data_json = json.dumps(payload).encode('utf-8')
+                req_json = urlrequest.Request(endpoint, data=data_json, headers={'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Smartly/1.0'})
+                with urlrequest.urlopen(req_json, timeout=20) as resp:
+                    body = resp.read().decode('utf-8')
+                    parsed = json.loads(body)
+                    # Expected: list of { language: 'en', confidence: 0.99 }
+                    if isinstance(parsed, list) and parsed:
+                        lang = parsed[0].get('language')
+                        if lang:
+                            return lang
+            except Exception:
+                pass
+            try:
+                data_form = urlencode(payload).encode('utf-8')
+                req_form = urlrequest.Request(endpoint, data=data_form, headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'User-Agent': 'Smartly/1.0'})
+                with urlrequest.urlopen(req_form, timeout=20) as resp:
+                    body = resp.read().decode('utf-8')
+                    parsed = json.loads(body)
+                    if isinstance(parsed, list) and parsed:
+                        lang = parsed[0].get('language')
+                        if lang:
+                            return lang
+            except Exception:
+                continue
+        return None
+
+    def _translate_chunk(chunk):
+        chunk = chunk or ''
+        if not chunk.strip():
+            return ''
+        # Determine source language if auto was requested
+        src = source_language_code or 'auto'
+        if (src == 'auto'):
+            detected = _detect_language(chunk)
+            if detected:
+                src = detected
+        payload = {
+            'q': chunk,
+            'source': src,
+            'target': target_language_code,
+            'format': 'text'
+        }
+        for endpoint in endpoints:
+            # Try JSON first
+            try:
+                data_json = json.dumps(payload).encode('utf-8')
+                req_json = urlrequest.Request(
+                    endpoint,
+                    data=data_json,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'User-Agent': 'Smartly/1.0'
+                    }
+                )
+                with urlrequest.urlopen(req_json, timeout=30) as resp:
+                    body = resp.read().decode('utf-8')
+                    parsed = json.loads(body)
+                    translated = parsed.get('translatedText', '')
+                    if translated and translated != chunk:
+                        return translated
+            except HTTPError as e:
+                # Attempt to read error body to see if it contains JSON we can parse
+                try:
+                    err_body = e.read().decode('utf-8')
+                    parsed_err = json.loads(err_body)
+                    translated = parsed_err.get('translatedText', '')
+                    if translated:
+                        return translated
+                except Exception:
+                    pass
+                # Fall through to form-encoded attempt
+            except (URLError, Exception):
+                # Fall through to form-encoded attempt
+                pass
+
+            # Form-encoded fallback
+            try:
+                data_form = urlencode(payload).encode('utf-8')
+                req_form = urlrequest.Request(
+                    endpoint,
+                    data=data_form,
+                    headers={
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Accept': 'application/json',
+                        'User-Agent': 'Smartly/1.0'
+                    }
+                )
+                with urlrequest.urlopen(req_form, timeout=30) as resp:
+                    body = resp.read().decode('utf-8')
+                    parsed = json.loads(body)
+                    translated = parsed.get('translatedText', '')
+                    if translated and translated != chunk:
+                        return translated
+            except Exception:
+                # Try next endpoint
+                continue
+
+        # Secondary fallback: MyMemory Translated API (free)
+        try:
+            def _mm_code(code: str) -> str:
+                c = (code or '').lower()
+                # Normalize Chinese variants
+                if c in ('zh', 'zh-cn', 'cn', 'zh-hans'):
+                    return 'zh-CN'
+                if c in ('zh-tw', 'tw', 'zh-hant', 'zh-hk', 'hk'):
+                    return 'zh-TW'
+                # MyMemory does NOT support 'auto' or empty sources; default to English
+                if not c or c in ('auto', 'und', 'unknown'):
+                    return 'en'
+                # Return as-is for typical 2-letter codes
+                return code
+
+            def _mm_translate_small(text_part: str) -> str:
+                src_pair = f"{_mm_code(payload['source'])}|{_mm_code(payload['target'])}"
+                query = urlencode({'q': text_part, 'langpair': src_pair})
+                url = f"https://api.mymemory.translated.net/get?{query}"
+                req_mm = urlrequest.Request(url, headers={'Accept': 'application/json', 'User-Agent': 'Smartly/1.0'})
+                with urlrequest.urlopen(req_mm, timeout=30) as resp:
+                    body = resp.read().decode('utf-8')
+                    parsed = json.loads(body)
+                    translated = ''
+                    if isinstance(parsed, dict):
+                        translated = (parsed.get('responseData') or {}).get('translatedText', '')
+                        if translated == text_part:
+                            matches = parsed.get('matches') or []
+                            for m in matches:
+                                cand = m.get('translation')
+                                if cand and cand != text_part:
+                                    translated = cand
+                                    break
+                    return translated
+
+            # MyMemory free API limits q to ~500 chars. Split into ~450-char chunks.
+            mm_max = 450
+            if len(chunk) <= mm_max:
+                mm_out = _mm_translate_small(chunk)
+                if mm_out and mm_out != chunk:
+                    return mm_out
+            else:
+                out_parts = []
+                start = 0
+                while start < len(chunk):
+                    end = min(start + mm_max, len(chunk))
+                    newline_pos = chunk.rfind('\n', start, end)
+                    space_pos = chunk.rfind(' ', start, end)
+                    if newline_pos != -1 and newline_pos > start + 50:
+                        end = newline_pos
+                    elif space_pos != -1 and space_pos > start + 50:
+                        end = space_pos
+                    part = chunk[start:end]
+                    translated_part = _mm_translate_small(part)
+                    out_parts.append(translated_part or part)
+                    start = end
+                mm_joined = ''.join(out_parts)
+                if mm_joined and mm_joined != chunk:
+                    return mm_joined
+        except Exception:
+            pass
+
+        # If none of the endpoints succeeded or translation unchanged
+        return f"[Translation unchanged: provider unavailable or returned same text]"
+
+    # Chunk by ~4000 characters to stay under typical API limits
+    chunks = []
+    max_len = 4000
+    text = text or ''
+    if len(text) <= max_len:
+        chunks = [text]
+    else:
+        start = 0
+        while start < len(text):
+            end = min(start + max_len, len(text))
+            # try to break at a newline for cleaner splits
+            newline_pos = text.rfind('\n', start, end)
+            if newline_pos != -1 and newline_pos > start + 1000:
+                end = newline_pos
+            chunks.append(text[start:end])
+            start = end
+
+    translated_parts = [_translate_chunk(c) for c in chunks]
+    return ''.join(translated_parts)
 
 def chat_with_openai(messages, system_prompt=None, model="gpt-3.5-turbo", max_tokens=800):
     """Generic chat helper using OpenAI ChatCompletion.

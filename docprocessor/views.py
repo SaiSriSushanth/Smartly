@@ -19,7 +19,7 @@ from .forms import DocumentUploadForm, DocumentSelectForm, DocumentMultiSelectFo
 from .utils import (
     extract_text_from_file, summarize_text, generate_answers, 
     analyze_text, translate_text, get_youtube_video_id, 
-    get_youtube_transcript, chat_with_openai
+    get_youtube_transcript, chat_with_openai, translate_text_free
 )
 import os
 
@@ -259,6 +259,40 @@ def document_result_view(request, result_id):
         'result': pr,
         'extracted_text': extracted_preview,
     })
+
+@login_required
+def translate_processed_result(request, result_id):
+    """Translate a persisted ProcessedResult using a free provider (LibreTranslate).
+    Creates a new ProcessedResult with the translated text and redirects to it.
+    """
+    pr = get_object_or_404(ProcessedResult, id=result_id)
+    document = pr.document
+    # Permission check
+    if document.user != request.user:
+        messages.error(request, 'You do not have permission to translate this result.')
+        return redirect('dashboard')
+
+    if request.method != 'POST':
+        return redirect('document_result', result_id=result_id)
+
+    target_lang = (request.POST.get('target_language') or '').strip().lower()
+    source_lang = (request.POST.get('source_language') or 'auto').strip().lower()
+    if not target_lang:
+        messages.error(request, 'Please select a target language.')
+        return redirect('document_result', result_id=result_id)
+
+    try:
+        translated_text = translate_text_free(pr.result_text, target_language_code=target_lang, source_language_code=source_lang)
+        # Treat provider error/unchanged markers as failures, not new results
+        marker = translated_text.strip()
+        if marker.startswith('[Translation error:') or marker.startswith('[Translation unchanged:'):
+            raise Exception(marker.strip('[]'))
+        new_pr = ProcessedResult.objects.create(document=document, result_text=translated_text)
+        messages.success(request, f'Translated result created ({target_lang}).')
+        return redirect('document_result', result_id=new_pr.id)
+    except Exception as e:
+        messages.error(request, f'Error translating: {e}')
+        return redirect('document_result', result_id=result_id)
 
 def process_multi_documents(request):
     """Process multiple documents together, combining text and honoring preset."""

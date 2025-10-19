@@ -10,6 +10,7 @@ urlpatterns = [
     path('process/multi/', views.process_multi_documents, name='process_multi_documents'),
     path('document/<int:document_id>/delete/', views.delete_document, name='delete_document'),
     path('result/<int:result_id>/', views.document_result_view, name='document_result'),
+    path('result/<int:result_id>/translate/', views.translate_processed_result, name='translate_processed_result'),
     path('result/<int:result_id>/delete/', views.delete_processed_result, name='delete_processed_result'),
     path('youtube/video/<int:video_id>/delete/', views.delete_youtube_video, name='delete_youtube_video'),
     path('youtube/result/<int:result_id>/delete/', views.delete_youtube_result, name='delete_youtube_result'),
