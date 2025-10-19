@@ -19,9 +19,11 @@ from .forms import DocumentUploadForm, DocumentSelectForm, DocumentMultiSelectFo
 from .utils import (
     extract_text_from_file, summarize_text, generate_answers, 
     analyze_text, translate_text, get_youtube_video_id, 
-    get_youtube_transcript, chat_with_openai, translate_text_free
+    get_youtube_transcript, chat_with_openai, translate_text_free,
+    recommend_youtube_videos_web
 )
 import os
+from django.conf import settings
 
 def home(request):
     """Home page view"""
@@ -885,6 +887,8 @@ def chat_view(request):
         focus_mode = request.POST.get('focus_mode', '0').strip()
         focus_only = focus_mode in ('1', 'true', 'on')
         selected_ids = request.POST.getlist('documents')
+        quick_action = request.POST.get('quick_action', '').strip()
+        silent_quick = bool(quick_action)
 
         if not active_session:
             active_session = ChatSession.objects.create(user=request.user, title=request.POST.get('title', '').strip() or '')
@@ -896,7 +900,8 @@ def chat_view(request):
 
         # Save user message
         if user_message:
-            ChatMessage.objects.create(session=active_session, role='user', content=user_message)
+            if not silent_quick:
+                ChatMessage.objects.create(session=active_session, role='user', content=user_message)
 
             # Build document context (trimmed)
             context_snippets = []
@@ -938,8 +943,25 @@ def chat_view(request):
                     "Do not use external knowledge."
                 )
 
-            # Call OpenAI
-            assistant_reply = chat_with_openai(history, system_prompt=system_prompt_final, max_tokens=800)
+            # Route quick action 'recommend_videos' to web search, otherwise use chat_with_openai
+            if quick_action == 'recommend_videos':
+                try:
+                    # Derive region bias from Django LANGUAGE_CODE
+                    lc = (getattr(settings, 'LANGUAGE_CODE', 'en-us') or 'en-us').lower()
+                    region = None
+                    if 'in' in lc:
+                        region = 'in-en'
+                    elif 'gb' in lc or 'uk' in lc:
+                        region = 'uk-en'
+                    elif 'us' in lc:
+                        region = 'us-en'
+                    else:
+                        region = 'wt-wt'
+                    assistant_reply = recommend_youtube_videos_web(user_message, max_results=5, region=region)
+                except Exception as e:
+                    assistant_reply = f"Sorry, I couldn’t fetch live recommendations right now. {str(e)}"
+            else:
+                assistant_reply = chat_with_openai(history, system_prompt=system_prompt_final, max_tokens=800)
 
             # Save assistant message
             ChatMessage.objects.create(session=active_session, role='assistant', content=assistant_reply)

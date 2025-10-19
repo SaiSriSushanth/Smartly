@@ -10,7 +10,7 @@ import re
 import json
 from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, parse_qs, quote, unquote
 
 # Configure OpenAI API key
 openai.api_key = os.getenv('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
@@ -416,3 +416,108 @@ def chat_with_openai(messages, system_prompt=None, model="gpt-3.5-turbo", max_to
         return response.choices[0].message.content
     except Exception as e:
         return f"Error chatting with OpenAI: {str(e)}"
+
+
+def recommend_youtube_videos_web(query, max_results=5, timeout=15, region=None):
+    """Fetch current YouTube video recommendations using DuckDuckGo HTML search and YouTube oEmbed.
+    - Returns a fenced smartly_videos JSON block for rich card rendering.
+    - Filters out YouTube Shorts and deduplicates links.
+    """
+    try:
+        q = f"site:youtube.com {query}".strip()
+        ddg_url = "https://duckduckgo.com/html/?q=" + quote(q) + (f"&kl={quote(region)}" if region else "")
+        req = urlrequest.Request(ddg_url, headers={'User-Agent': 'Smartly/1.0', 'Accept': 'text/html'})
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+    except Exception as e:
+        return f"Error searching for videos: {str(e)}"
+
+    # Extract result links from DuckDuckGo HTML (no-JS version)
+    links = []
+    try:
+        for m in re.finditer(r'<a[^>]+class="[^\"]*result__a[^\"]*"[^>]+href="([^"]+)"', html, re.IGNORECASE):
+            href = m.group(1)
+            url = href
+            if 'uddg=' in href:
+                try:
+                    parsed = urlparse(href)
+                    qs = parse_qs(parsed.query)
+                    if 'uddg' in qs and qs['uddg']:
+                        url = unquote(qs['uddg'][0])
+                    else:
+                        mm = re.search(r'uddg=([^&]+)', href)
+                        url = unquote(mm.group(1)) if mm else href
+                except Exception:
+                    url = href
+            # Accept watch links and youtu.be; exclude shorts
+            is_watch = ('youtube.com/watch' in url) or ('youtu.be/' in url)
+            is_short = ('/shorts/' in url)
+            if is_watch and not is_short:
+                links.append(url)
+            if len(links) >= max_results * 3:
+                break
+    except Exception:
+        pass
+
+    # Deduplicate while preserving order
+    unique = []
+    seen = set()
+    for u in links:
+        key = u.split('&')[0]
+        if key not in seen:
+            seen.add(key)
+            unique.append(u)
+        if len(unique) >= max_results * 2:
+            break
+
+    # Fetch title/channel via YouTube oEmbed (no API key) and build JSON
+    results = []
+    for link in unique:
+        title = None
+        channel = None
+        thumb = None
+        try:
+            oembed = "https://www.youtube.com/oembed?format=json&url=" + quote(link, safe='')
+            rq = urlrequest.Request(oembed, headers={'User-Agent': 'Smartly/1.0', 'Accept': 'application/json'})
+            with urlrequest.urlopen(rq, timeout=timeout) as r2:
+                data = json.loads(r2.read().decode('utf-8'))
+                title = data.get('title')
+                channel = data.get('author_name')
+        except Exception:
+            pass
+        try:
+            # Extract video id for thumbnail
+            m = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})(?:[&?/]|$)', link)
+            vid_id = m.group(1) if m else None
+            if vid_id:
+                thumb = f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"
+        except Exception:
+            thumb = None
+        results.append({'url': link, 'title': title or '', 'channel': channel or '', 'thumb': thumb or ''})
+
+    if not results:
+        return (
+            "I couldn't find live YouTube links right now. Try refining the topic "
+            "or check your network."
+        )
+
+    # Return structured fenced block for card rendering
+    try:
+        payload = json.dumps(results[:max_results])
+        return f"```smartly_videos\n{payload}\n```"
+    except Exception:
+        # Fallback to markdown list
+        lines = ["Here are current YouTube picks for your topic:", ""]
+        for i, r in enumerate(results[:max_results], 1):
+            t = r['title'] or f"Video {i}"
+            ch = r['channel'] or 'YouTube'
+            lines.append(f"- {t} — {ch}\n  {r['url']}")
+        return "\n".join(lines)
+
+    # Compose reply
+    lines = ["Here are current YouTube picks for your topic:", ""]
+    for i, r in enumerate(results, 1):
+        t = r['title'] or f"Video {i}"
+        ch = r['channel'] or 'YouTube'
+        lines.append(f"- {t} — {ch}\n  {r['url']}")
+    return "\n".join(lines)

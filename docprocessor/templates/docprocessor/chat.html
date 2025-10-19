@@ -111,20 +111,35 @@
               <input type="hidden" name="system_prompt" id="hiddenSystemPrompt">
               <!-- Hidden focus mode flag -->
               <input type="hidden" name="focus_mode" id="focusModeInput" value="0">
+              <!-- Hidden quick action flag -->
+              <input type="hidden" name="quick_action" id="quickActionInput" value="">
             </div>
           </form>
         </div>
         {% block extra_js %}
-        <!-- KaTeX for LaTeX rendering -->
+        <!-- KaTeX for LaTeX math rendering -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+        <!-- Mermaid for flowcharts/diagrams -->
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
         <script>
           (function(){
             const el = document.getElementById('chatMessages');
-            if (el) {
-              el.scrollTop = el.scrollHeight;
+            if (el) { el.scrollTop = el.scrollHeight; }
+
+            // Initialize Mermaid if available
+            if (window.mermaid) {
+              try { window.mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' }); } catch (e) {}
             }
+
+            // Re-render any preloaded assistant bubbles to support smartly_videos/cards
+            try {
+              document.querySelectorAll('.bubble-assistant').forEach(b => {
+                const raw = b.textContent;
+                renderMessageContent(b, raw);
+              });
+            } catch (e) {}
             // Helper to render math once KaTeX is loaded
             function renderMathTarget(target){
               try {
@@ -140,28 +155,132 @@
                 }
               } catch (e) {}
             }
+
+            function renderMermaidTarget(target){
+              try {
+                if (window.mermaid) {
+                  const blocks = target.querySelectorAll('.mermaid');
+                  if (blocks && blocks.length) {
+                    window.mermaid.init(undefined, blocks);
+                  }
+                }
+              } catch (e) {}
+            }
+
+            // Detect and render fenced code blocks (mermaid, latex, etc.)
+            function renderMessageContent(bubble, content){
+              const fenceRe = /```(\w+)?\s*\n([\s\S]*?)```/m;
+              const m = fenceRe.exec(content);
+              if (!m) {
+                bubble.textContent = content;
+                return;
+              }
+              const lang = (m[1] || '').toLowerCase();
+              const code = m[2] || '';
+              // Clear bubble
+              bubble.innerHTML = '';
+              if (lang === 'mermaid') {
+                const info = document.createElement('div');
+                info.className = 'text-muted small mb-2';
+                info.textContent = 'Mermaid flowchart ready. View it in a larger card.';
+                bubble.appendChild(info);
+
+                const btnView = document.createElement('button');
+                btnView.type = 'button';
+                btnView.className = 'btn btn-outline-primary btn-sm';
+                btnView.innerHTML = '<i class="fas fa-eye me-1"></i> View Flowchart';
+                btnView.addEventListener('click', function(){
+                  openFlowchartCard(code);
+                });
+                bubble.appendChild(btnView);
+              } else if (lang === 'smartly_videos') {
+                // Render structured video cards from JSON payload
+                let items = null;
+                try { items = JSON.parse(code.trim()); } catch (e) { items = null; }
+                if (Array.isArray(items) && items.length) {
+                  const grid = document.createElement('div');
+                  grid.className = 'row g-3';
+                  items.slice(0, 12).forEach(item => {
+                    const col = document.createElement('div');
+                    col.className = 'col-12 col-sm-6 col-lg-4';
+
+                    const card = document.createElement('div');
+                    card.className = 'card glass h-100';
+
+                    if (item.thumb) {
+                      const img = document.createElement('img');
+                      img.className = 'card-img-top';
+                      img.src = item.thumb;
+                      img.alt = item.title || 'Video thumbnail';
+                      card.appendChild(img);
+                    }
+
+                    const body = document.createElement('div');
+                    body.className = 'card-body';
+
+                    const titleEl = document.createElement('h6');
+                    titleEl.className = 'card-title';
+                    titleEl.textContent = item.title || 'YouTube Video';
+
+                    const channelEl = document.createElement('div');
+                    channelEl.className = 'text-muted small mb-2';
+                    channelEl.textContent = item.channel || 'YouTube';
+
+                    const openBtn = document.createElement('a');
+                    openBtn.className = 'btn btn-outline-primary btn-sm';
+                    openBtn.textContent = 'Open';
+                    openBtn.href = item.url || '#';
+                    openBtn.target = '_blank';
+                    openBtn.rel = 'noopener';
+
+                    body.appendChild(titleEl);
+                    body.appendChild(channelEl);
+                    body.appendChild(openBtn);
+
+                    card.appendChild(body);
+                    col.appendChild(card);
+                    grid.appendChild(col);
+                  });
+                  bubble.appendChild(grid);
+                } else {
+                  // Fallback: show as code block if JSON parsing fails
+                  const pre = document.createElement('pre');
+                  pre.style.whiteSpace = 'pre-wrap';
+                  pre.style.wordBreak = 'break-word';
+                  const codeEl = document.createElement('code');
+                  codeEl.textContent = code;
+                  pre.appendChild(codeEl);
+                  bubble.appendChild(pre);
+                }
+              } else {
+                // Show as a code block for readability
+                const pre = document.createElement('pre');
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.wordBreak = 'break-word';
+                const codeEl = document.createElement('code');
+                codeEl.textContent = code;
+                pre.appendChild(codeEl);
+                bubble.appendChild(pre);
+              }
+            }
+
             // Ensure initial messages render after all deferred scripts load
             window.addEventListener('load', function(){
-              if (el) renderMathTarget(el);
+              if (el) {
+                // Transform assistant bubbles that contain code fences
+                const assists = el.querySelectorAll('.bubble-assistant');
+                assists.forEach(b => {
+                  const txt = b.textContent || '';
+                  renderMessageContent(b, txt);
+                });
+                renderMathTarget(el);
+              }
             });
+
             // CSRF helper
             function getCsrfToken(form){
               const inp = form.querySelector('input[name="csrfmiddlewaretoken"]');
               return inp ? inp.value : '';
-            }
-
-            // Append a message bubble
-            function appendMessage(role, content){
-              const wrap = document.createElement('div');
-              wrap.className = 'd-flex mb-3';
-              const bubble = document.createElement('div');
-              bubble.className = 'message-bubble p-3 rounded ' + (role === 'user' ? 'bubble-user ms-auto' : 'bubble-assistant me-auto');
-              bubble.textContent = content;
-              wrap.appendChild(bubble);
-              el.appendChild(wrap);
-              // Render LaTeX in the new bubble (after KaTeX loads)
-              renderMathTarget(bubble);
-              el.scrollTop = el.scrollHeight;
             }
 
             // Simple dedupe: if the last bubble for role matches, skip
@@ -176,6 +295,119 @@
                 }
               }
               return '';
+            }
+
+            function openFlowchartCard(code){
+              const modalEl = document.getElementById('flowchartModal');
+              const container = document.getElementById('flowchartContainer');
+              if (!modalEl || !container) return;
+              container.innerHTML = '';
+              const mer = document.createElement('div');
+              mer.className = 'mermaid';
+              mer.textContent = code;
+              container.appendChild(mer);
+              if (window.bootstrap && bootstrap.Modal) {
+                const m = new bootstrap.Modal(modalEl);
+                const onShown = function(){
+                  modalEl.removeEventListener('shown.bs.modal', onShown);
+                  renderMermaidInContainer(container, code);
+                };
+                const onHidden = function(){
+                  modalEl.removeEventListener('hidden.bs.modal', onHidden);
+                  container.innerHTML = '';
+                };
+                modalEl.addEventListener('shown.bs.modal', onShown);
+                modalEl.addEventListener('hidden.bs.modal', onHidden);
+                m.show();
+              } else {
+                renderMermaidInContainer(container, code);
+              }
+            }
+
+            function renderMermaidInContainer(container, code){
+              try {
+                if (!window.mermaid) {
+                  showMermaidError('Mermaid library not loaded', code, container);
+                  return;
+                }
+                // Validate syntax first; show helpful fallback if it fails
+                try { window.mermaid.parse(code); } catch (err) {
+                  showMermaidError(err, code, container);
+                  return;
+                }
+                const blocks = container.querySelectorAll('.mermaid');
+                if (typeof window.mermaid.run === 'function') {
+                  window.mermaid.run({ querySelector: '#flowchartContainer .mermaid' }).catch(err => {
+                    showMermaidError(err, code, container);
+                  });
+                } else {
+                  window.mermaid.init(undefined, blocks);
+                }
+              } catch (e) {
+                showMermaidError(e, code, container);
+              }
+            }
+
+            function showMermaidError(err, code, container){
+              try {
+                const alert = document.createElement('div');
+                alert.className = 'alert alert-warning';
+                alert.textContent = 'Could not render diagram: ' + (err && err.message ? err.message : String(err));
+                container.appendChild(alert);
+                const pre = document.createElement('pre');
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.textContent = code;
+                container.appendChild(pre);
+              } catch(e){}
+            }
+
+            // Append a message bubble and, for assistant replies, quick-action prompts
+            function appendMessage(role, content){
+              const wrap = document.createElement('div');
+              wrap.className = 'd-flex mb-2';
+              const bubble = document.createElement('div');
+              bubble.className = 'message-bubble p-3 rounded ' + (role === 'user' ? 'bubble-user ms-auto' : 'bubble-assistant me-auto');
+              renderMessageContent(bubble, content);
+              wrap.appendChild(bubble);
+              el.appendChild(wrap);
+              // Render math in the new bubble
+              renderMathTarget(bubble);
+
+              // After assistant reply, show quick actions
+              if (role === 'assistant') {
+                const actions = document.createElement('div');
+                actions.className = 'd-flex gap-2 mb-3';
+                const label = document.createElement('span');
+                label.className = 'text-muted small me-2';
+                label.textContent = 'Suggested follow-ups:';
+                actions.appendChild(label);
+
+                const btnMermaid = document.createElement('button');
+                btnMermaid.type = 'button';
+                btnMermaid.className = 'btn btn-outline-secondary btn-sm';
+                btnMermaid.innerHTML = '<i class="fas fa-diagram-project me-1"></i> Mermaid Flowchart';
+                btnMermaid.addEventListener('click', function(){
+                  const topic = lastBubbleText('user') || bubble.textContent || 'the topic discussed';
+                  const prompt = 'Create a concise Mermaid flowchart for: ' + topic + '. Return ONLY a fenced ```mermaid code block. Keep it readable and focused.';
+                  sendPrompt(prompt, { silent: true, action: 'mermaid_flowchart' });
+                });
+
+                const btnYT = document.createElement('button');
+                btnYT.type = 'button';
+                btnYT.className = 'btn btn-outline-secondary btn-sm';
+                btnYT.innerHTML = '<i class="fab fa-youtube me-1"></i> Recommend Videos';
+                btnYT.addEventListener('click', function(){
+                  const topic = lastBubbleText('user') || bubble.textContent || 'the topic discussed';
+                  const prompt = 'Recommend 5 high-quality YouTube videos to learn ' + topic + '. For each: title, channel, and a one-line summary. Prefer educational channels. If URLs are uncertain, give clear search queries.';
+                  sendPrompt(prompt, { silent: true, action: 'recommend_videos' });
+                });
+
+                actions.appendChild(btnMermaid);
+                actions.appendChild(btnYT);
+                el.appendChild(actions);
+              }
+
+              el.scrollTop = el.scrollHeight;
             }
 
             // Auto-submit context on checkbox change via AJAX
@@ -212,6 +444,71 @@
             // Copy system prompt into message form before sending
             const msgForm = document.getElementById('messageForm');
             const hiddenSys = document.getElementById('hiddenSystemPrompt');
+            let sendBusy = false;
+            const hiddenAction = document.getElementById('quickActionInput');
+
+            function applySystemPrompt(){
+              try {
+                const persona = localStorage.getItem(storageKeyPersona);
+                const storedPrompt = localStorage.getItem(storageKeyPrompt);
+                hiddenSys.value = storedPrompt || (persona ? PERSONA_PROMPTS[persona] : '');
+              } catch (e) {
+                hiddenSys.value = '';
+              }
+            }
+
+            function sendPrompt(text, opts){
+              if (!msgForm || !hiddenSys || sendBusy) return;
+              const t = (text || '').trim();
+              if (!t) return;
+              const silent = !!(opts && opts.silent);
+              const action = (opts && opts.action) ? String(opts.action) : '';
+              sendBusy = true;
+              applySystemPrompt();
+              // Show user message only when not silent
+              if (!silent && lastBubbleText('user') !== t) {
+                appendMessage('user', t);
+              }
+              const sendBtn = msgForm.querySelector('button[type="submit"]');
+              if (sendBtn) sendBtn.disabled = true;
+              const original = msgForm.querySelector('textarea[name="message"]').value;
+              msgForm.querySelector('textarea[name="message"]').value = t;
+              if (hiddenAction) hiddenAction.value = action;
+              const fd = new FormData(msgForm);
+              fetch(msgForm.action, {
+                method: 'POST',
+                headers: {
+                  'X-Requested-With': 'XMLHttpRequest',
+                  'X-CSRFToken': getCsrfToken(msgForm)
+                },
+                body: fd
+              }).then(r => r.json()).then(data => {
+                // Update session id if new
+                if (data && data.session_id) {
+                  const msgSid = document.getElementById('sessionIdMsg');
+                  const ctxSid = document.getElementById('sessionIdCtx');
+                  if (msgSid) msgSid.value = data.session_id;
+                  if (ctxSid) ctxSid.value = data.session_id;
+                  const badge = document.querySelector('.card-header .badge');
+                  if (badge) badge.textContent = 'Session #' + data.session_id;
+                }
+                // Render assistant reply
+                if (data && typeof data.assistant_reply === 'string') {
+                  if (lastBubbleText('assistant') !== data.assistant_reply) {
+                    appendMessage('assistant', data.assistant_reply);
+                  }
+                }
+              }).catch(() => {
+                // On error, do nothing or show a toast (not implemented)
+              }).finally(() => {
+                // Restore message box state
+                msgForm.querySelector('textarea[name="message"]').value = original || '';
+                if (hiddenAction) hiddenAction.value = '';
+                sendBusy = false;
+                if (sendBtn) sendBtn.disabled = false;
+              });
+            }
+
             if (msgForm && hiddenSys) {
               if (!msgForm.dataset.bound) {
                 msgForm.dataset.bound = '1';
@@ -223,13 +520,7 @@
                 sending = true;
                 let userText = msgForm.querySelector('textarea[name="message"]').value.trim();
                 if (!userText) return;
-                try {
-                  const persona = localStorage.getItem(storageKeyPersona);
-                  const storedPrompt = localStorage.getItem(storageKeyPrompt);
-                  hiddenSys.value = storedPrompt || (persona ? PERSONA_PROMPTS[persona] : '');
-                } catch (e) {
-                  hiddenSys.value = '';
-                }
+                applySystemPrompt();
                 // Show user message immediately
                 if (lastBubbleText('user') !== userText) {
                   appendMessage('user', userText);
@@ -373,7 +664,26 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- Flowchart viewer modal with card -->
+<div class="modal fade" id="flowchartModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content glass">
+      <div class="modal-header">
+        <h5 class="modal-title">Flowchart Viewer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="card">
+          <div class="card-body" style="min-height: 400px; overflow:auto;">
+            <div id="flowchartContainer" class="w-100"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
+</div>
 
 <script>
   function openDeleteModal(btn) {
