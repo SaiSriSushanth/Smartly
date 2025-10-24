@@ -138,6 +138,8 @@
               document.querySelectorAll('.bubble-assistant').forEach(b => {
                 const raw = b.textContent;
                 renderMessageContent(b, raw);
+                // Also render LaTeX math in assistant bubbles
+                renderMathTarget(b);
               });
             } catch (e) {}
             // Helper to render math once KaTeX is loaded
@@ -148,7 +150,18 @@
                     delimiters: [
                       {left: '$$', right: '$$', display: true},
                       {left: '\\[', right: '\\]', display: true},
-                      {left: '$', right: '$', display: false}
+                      {left: '\\(', right: '\\)', display: false},
+                      {left: '$', right: '$', display: false},
+                      // Common LaTeX environments
+                      {left: '\\begin{equation}', right: '\\end{equation}', display: true},
+                      {left: '\\begin{align}', right: '\\end{align}', display: true},
+                      {left: '\\begin{aligned}', right: '\\end{aligned}', display: true},
+                      {left: '\\begin{matrix}', right: '\\end{matrix}', display: true},
+                      {left: '\\begin{pmatrix}', right: '\\end{pmatrix}', display: true},
+                      {left: '\\begin{bmatrix}', right: '\\end{bmatrix}', display: true},
+                      {left: '\\begin{Bmatrix}', right: '\\end{Bmatrix}', display: true},
+                      {left: '\\begin{vmatrix}', right: '\\end{vmatrix}', display: true},
+                      {left: '\\begin{Vmatrix}', right: '\\end{Vmatrix}', display: true}
                     ],
                     throwOnError: false
                   });
@@ -172,6 +185,8 @@
               const fenceRe = /```(\w+)?\s*\n([\s\S]*?)```/m;
               const m = fenceRe.exec(content);
               if (!m) {
+                // For regular content, keep it safe and preserve line breaks
+                bubble.style.whiteSpace = 'pre-wrap';
                 bubble.textContent = content;
                 return;
               }
@@ -264,16 +279,11 @@
               }
             }
 
-            // Ensure initial messages render after all deferred scripts load
+            // After scripts load, run math/diagram rendering without re-processing bubble text
             window.addEventListener('load', function(){
               if (el) {
-                // Transform assistant bubbles that contain code fences
-                const assists = el.querySelectorAll('.bubble-assistant');
-                assists.forEach(b => {
-                  const txt = b.textContent || '';
-                  renderMessageContent(b, txt);
-                });
                 renderMathTarget(el);
+                renderMermaidTarget(el);
               }
             });
 
@@ -465,8 +475,8 @@
               const action = (opts && opts.action) ? String(opts.action) : '';
               sendBusy = true;
               applySystemPrompt();
-              // Show user message only when not silent
-              if (!silent && lastBubbleText('user') !== t) {
+              // Show user message immediately (allow repeats, dedupe handled by sendBusy)
+              if (!silent) {
                 appendMessage('user', t);
               }
               const sendBtn = msgForm.querySelector('button[type="submit"]');
@@ -521,10 +531,8 @@
                 let userText = msgForm.querySelector('textarea[name="message"]').value.trim();
                 if (!userText) return;
                 applySystemPrompt();
-                // Show user message immediately
-                if (lastBubbleText('user') !== userText) {
-                  appendMessage('user', userText);
-                }
+                // Show user message immediately (allow repeats; 'sending' prevents double-submits)
+                appendMessage('user', userText);
                 if (sendBtn) sendBtn.disabled = true;
                 const fd = new FormData(msgForm);
                 fetch(msgForm.action, {
